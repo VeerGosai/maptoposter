@@ -4,13 +4,18 @@ Generate beautiful, minimalist map posters for any city in the world.
 
 ## Examples
 
-| New York (noir) | Tokyo (japanese_ink) | Barcelona (warm_beige) |
-|:---:|:---:|:---:|
-| <img src="posters/new_york_noir_20260108_172453.png" width="250"> | <img src="posters/tokyo_japanese_ink_20260108_165830.png" width="250"> | <img src="posters/barcelona_warm_beige_20260108_172924.png" width="250"> |
 
-| Venice (blueprint) | Chicago (noir) | Mumbai (contrast_zones) |
-|:---:|:---:|:---:|
-| <img src="posters/venice_blueprint_20260108_165527.png" width="250"> | <img src="posters/chicago_noir_20260108_173313.png" width="250"> | <img src="posters/mumbai_contrast_zones_20260108_172010.png" width="250"> |
+| Country      | City           | Theme           | Poster |
+|:------------:|:--------------:|:---------------:|:------:|
+| USA          | San Francisco  | sunset          | <img src="posters/san_francisco_sunset_20260108_184122.png" width="250"> |
+| Spain        | Barcelona      | warm_beige      | <img src="posters/barcelona_warm_beige_20260108_172924.png" width="250"> |
+| Italy        | Venice         | blueprint       | <img src="posters/venice_blueprint_20260108_165527.png" width="250"> |
+| Japan        | Tokyo          | japanese_ink    | <img src="posters/tokyo_japanese_ink_20260108_165830.png" width="250"> |
+| India        | Mumbai         | contrast_zones  | <img src="posters/mumbai_contrast_zones_20260108_170325.png" width="250"> |
+| Morocco      | Marrakech      | terracotta      | <img src="posters/marrakech_terracotta_20260108_180821.png" width="250"> |
+| Singapore    | Singapore      | neon_cyberpunk  | <img src="posters/singapore_neon_cyberpunk_20260108_184503.png" width="250"> |
+| Australia    | Melbourne      | forest          | <img src="posters/melbourne_forest_20260108_181459.png" width="250"> |
+| UAE          | Dubai          | midnight_blue   | <img src="posters/dubai_midnight_blue_20260108_174920.png" width="250"> |
 
 ## Installation
 
