@@ -2,6 +2,9 @@
 
 Generate beautiful, minimalist map posters for any city in the world.
 
+<img src="posters/singapore_neon_cyberpunk_20260108_184503.png" width="250">
+<img src="posters/dubai_midnight_blue_20260108_174920.png" width="250">
+
 ## Examples
 
 
