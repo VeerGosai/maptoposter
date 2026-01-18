@@ -8,6 +8,7 @@ from tqdm import tqdm
 import time
 import json
 import os
+import sys
 from datetime import datetime
 import argparse
 
@@ -425,27 +426,27 @@ Examples:
     args = parser.parse_args()
     
     # If no arguments provided, show examples
-    if len(os.sys.argv) == 1:
+    if len(sys.argv) == 1:
         print_examples()
-        os.sys.exit(0)
+        sys.exit(0)
     
     # List themes if requested
     if args.list_themes:
         list_themes()
-        os.sys.exit(0)
+        sys.exit(0)
     
     # Validate required arguments
     if not args.city or not args.country:
         print("Error: --city and --country are required.\n")
         print_examples()
-        os.sys.exit(1)
+        sys.exit(1)
     
     # Validate theme exists
     available_themes = get_available_themes()
     if args.theme not in available_themes:
         print(f"Error: Theme '{args.theme}' not found.")
         print(f"Available themes: {', '.join(available_themes)}")
-        os.sys.exit(1)
+        sys.exit(1)
     
     print("=" * 50)
     print("City Map Poster Generator")
@@ -468,4 +469,4 @@ Examples:
         print(f"\n✗ Error: {e}")
         import traceback
         traceback.print_exc()
-        os.sys.exit(1)
+        sys.exit(1)
