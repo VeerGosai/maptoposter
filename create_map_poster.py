@@ -266,7 +266,7 @@ def create_poster(city, country, point, dist, output_file):
     print("Rendering map...")
     fig, ax = plt.subplots(figsize=(12, 16), facecolor=THEME['bg'])
     ax.set_facecolor(THEME['bg'])
-    ax.set_position([0, 0, 1, 1])
+    ax.set_position((0.0, 0.0, 1.0, 1.0))
     
     # 3. Plot Layers
     # Layer 1: Polygons
