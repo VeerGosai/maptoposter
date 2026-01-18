@@ -11,6 +11,7 @@ import os
 import sys
 from datetime import datetime
 import argparse
+import asyncio
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
@@ -207,8 +208,25 @@ def get_coordinates(city, country):
     
     location = geolocator.geocode(f"{city}, {country}")
     
+    # If geocode returned a coroutine in some environments, run it to get the result.
+    if asyncio.iscoroutine(location):
+        try:
+            location = asyncio.run(location)
+        except RuntimeError:
+            # If an event loop is already running, try using it to complete the coroutine.
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                # Running event loop in the same thread; raise a clear error.
+                raise RuntimeError("Geocoder returned a coroutine while an event loop is already running. Run this script in a synchronous environment.")
+            location = loop.run_until_complete(location)
+    
     if location:
-        print(f"✓ Found: {location.address}")
+        # Use getattr to safely access address (helps static analyzers)
+        addr = getattr(location, "address", None)
+        if addr:
+            print(f"✓ Found: {addr}")
+        else:
+            print("✓ Found location (address not available)")
         print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
         return (location.latitude, location.longitude)
     else:
