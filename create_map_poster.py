@@ -10,25 +10,43 @@ import json
 import os
 from datetime import datetime
 import argparse
+from pathlib import Path
+from hashlib import md5
 import pickle
 
-CACHE_DIR = "cache"
+class CacheError(Exception):
+    """Raised when a cache operation fails."""
+    pass
 
-if not os.path.exists(CACHE_DIR):
-    os.makedirs(CACHE_DIR)
+CACHE_DIR_PATH = os.environ.get("CACHE_DIR", "cache")
+CACHE_DIR = Path(CACHE_DIR_PATH)
 
-def cache_get(filename):
-    path = os.path.join(CACHE_DIR, filename)
-    if os.path.exists(path):
-        with open(path, 'rb') as f:
+CACHE_DIR.mkdir(exist_ok=True)
+
+def cache_file(key: str) -> str:
+    encoded = md5(key.encode()).hexdigest()
+    return f"{encoded}.pkl"
+
+def cache_get(name: str) -> dict | None:
+    path = CACHE_DIR / cache_file(name)
+    if path.exists():
+        with path.open("rb") as f:
             return pickle.load(f)
     return None
 
-def cache_set(filename, obj):
-    path = os.path.join(CACHE_DIR, filename)
-    with open(path, 'wb') as f:
-        pickle.dump(obj, f)
-
+def cache_set(name: str, obj) -> None:
+    path = CACHE_DIR / cache_file(name)
+    try:
+        with path.open("wb") as f:
+            pickle.dump(obj, f)
+    except pickle.PickleError as e:
+        raise CacheError(
+            f"Serialization error while saving cache for '{name}': {e}"
+        ) from e
+    except (OSError, IOError) as e:
+        raise CacheError(
+            f"File error while saving cache for '{name}': {e}"
+        ) from e
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
@@ -218,8 +236,8 @@ def get_coordinates(city, country):
     Fetches coordinates for a given city and country using geopy.
     Includes rate limiting to be respectful to the geocoding service.
     """
-    cache_file = f"coords_{city.lower()}_{country.lower()}.pkl"
-    cached = cache_get(cache_file)
+    coords = f"coords_{city.lower()}_{country.lower()}"
+    cached = cache_get(coords)
     if cached:
         print(f"✓ Using cached coordinates for {city}, {country}")
         return cached
@@ -233,39 +251,53 @@ def get_coordinates(city, country):
     location = geolocator.geocode(f"{city}, {country}")
     
     if location:
-        cache_set(cache_file, (location.latitude, location.longitude))
         print(f"✓ Found: {location.address}")
         print(f"✓ Coordinates: {location.latitude}, {location.longitude}")
+        try:
+            cache_set(coords, (location.latitude, location.longitude))
+        except CacheError as e:
+            print(e)
         return (location.latitude, location.longitude)
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
 def fetch_graph(point, dist):
     lat, lon = point
-    cache_file = f"graph_{lat}_{lon}_{dist}.pkl"
-    cached = cache_get(cache_file)
+    graph = f"graph_{lat}_{lon}_{dist}"
+    cached = cache_get(graph)
     if cached is not None:
         print("✓ Using cached street network")
         return cached
 
-    G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
-    cache_set(cache_file, G)
-    return G
+    try:
+        G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
+        try:
+            cache_set(graph, G)
+        except CacheError as e:
+            print(e)
+        return G
+    except Exception as e:
+        print(f"OSMnx error while fetching graph: {e}")
+        return None
 
 def fetch_features(point, dist, tags, name):
     lat, lon = point
     tag_str = "_".join(tags.keys())
-    cache_file = f"{name}_{lat}_{lon}_{dist}_{tag_str}.pkl"
-    cached = cache_get(cache_file)
+    features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
+    cached = cache_get(features)
     if cached is not None:
         print(f"✓ Using cached {name}")
         return cached
 
     try:
         data = ox.features_from_point(point, tags=tags, dist=dist)
-        cache_set(cache_file, data)
+        try:
+            cache_set(features, data)
+        except CacheError as e:
+            print(e)
         return data
-    except:
+    except Exception as e:
+        print(f"OSMnx error while fetching features: {e}")
         return None
 
 def create_poster(city, country, point, dist, output_file, output_format):
