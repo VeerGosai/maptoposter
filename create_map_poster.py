@@ -96,7 +96,7 @@ def load_theme(theme_name="feature_based"):
         return theme
 
 # Load theme (can be changed via command line or input)
-THEME = None  # Will be loaded later
+THEME = dict[str, str]()  # Will be loaded later
 
 def create_gradient_fade(ax, color, location='bottom', zorder=10):
     """
