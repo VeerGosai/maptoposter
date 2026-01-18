@@ -271,6 +271,8 @@ def fetch_graph(point, dist):
 
     try:
         G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
+        # Rate limit between requests
+        time.sleep(0.5)
         try:
             cache_set(graph, G)
         except CacheError as e:
@@ -291,6 +293,8 @@ def fetch_features(point, dist, tags, name):
 
     try:
         data = ox.features_from_point(point, tags=tags, dist=dist)
+        # Rate limit between requests
+        time.sleep(0.3)
         try:
             cache_set(features, data)
         except CacheError as e:
@@ -309,13 +313,11 @@ def create_poster(city, country, point, dist, output_file, output_format):
         pbar.set_description("Downloading street network")
         G = fetch_graph(point, dist)
         pbar.update(1)
-        time.sleep(0.5)  # Rate limit between requests
         
         # 2. Fetch Water Features
         pbar.set_description("Downloading water features")
         water = fetch_features(point, dist, {'natural': 'water', 'waterway': 'riverbank'}, 'water')
         pbar.update(1)
-        time.sleep(0.3)
         
         # 3. Fetch Parks
         pbar.set_description("Downloading parks/green spaces")
