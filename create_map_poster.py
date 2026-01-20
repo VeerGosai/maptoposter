@@ -205,7 +205,10 @@ def get_coordinates(city, country):
     # Add a small delay to respect Nominatim's usage policy
     time.sleep(1)
     
-    location = geolocator.geocode(f"{city}, {country}")
+    try:
+        location = geolocator.geocode(f"{city}, {country}")
+    except Exception as e:
+        raise ValueError(f"Geocoding failed for {city}, {country}: {e}")
     
     if location:
         print(f"✓ Found: {location.address}")
@@ -214,7 +217,7 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
-def create_poster(city, country, point, dist, output_file, output_format):
+def create_poster(city, country, point, dist, output_file, output_format, country_label=None, name_label=None):
     print(f"\nGenerating map for {city}, {country}...")
     
     # Progress bar for data fetching
@@ -294,11 +297,12 @@ def create_poster(city, country, point, dist, output_file, output_format):
         font_sub = FontProperties(family='monospace', weight='normal', size=22)
         font_coords = FontProperties(family='monospace', size=14)
     
-    spaced_city = "  ".join(list(city.upper()))
+    display_city = name_label if name_label is not None else city
+    spaced_city = "  ".join(list(display_city.upper()))
     
     # Dynamically adjust font size based on city name length to prevent truncation
     base_font_size = 60
-    city_char_count = len(city)
+    city_char_count = len(display_city)
     if city_char_count > 10:
         # Scale down font size for longer names
         scale_factor = 10 / city_char_count
@@ -315,7 +319,8 @@ def create_poster(city, country, point, dist, output_file, output_format):
     ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
             color=THEME['text'], ha='center', fontproperties=font_main_adjusted, zorder=11)
     
-    ax.text(0.5, 0.10, country.upper(), transform=ax.transAxes,
+    country_text = country_label if country_label is not None else country
+    ax.text(0.5, 0.10, country_text.upper(), transform=ax.transAxes,
             color=THEME['text'], ha='center', fontproperties=font_sub, zorder=11)
     
     lat, lon = point
@@ -398,7 +403,9 @@ Examples:
 Options:
   --city, -c        City name (required)
   --country, -C     Country name (required)
+  --country-label   Override country text displayed on poster
   --theme, -t       Theme name (default: feature_based)
+  --all-themes      Generate posters for all themes
   --distance, -d    Map radius in meters (default: 29000)
   --list-themes     List all available themes
 
@@ -451,7 +458,12 @@ Examples:
     
     parser.add_argument('--city', '-c', type=str, help='City name')
     parser.add_argument('--country', '-C', type=str, help='Country name')
+    parser.add_argument('--latitude', type=float, help='Latitude (overrides geocoded latitude; use with --longitude)')
+    parser.add_argument('--longitude', type=float, help='Longitude (overrides geocoded longitude; use with --latitude)')
+    parser.add_argument('--name', dest='name_label', type=str, help='Override city text displayed on poster')
+    parser.add_argument('--country-label', dest='country_label', type=str, help='Override country text displayed on poster')
     parser.add_argument('--theme', '-t', type=str, default='feature_based', help='Theme name (default: feature_based)')
+    parser.add_argument('--all-themes', '--All-themes', dest='all_themes', action='store_true', help='Generate posters for all themes')
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
     parser.add_argument('--format', '-f', default='png', choices=['png', 'svg', 'pdf'],help='Output format for the poster (default: png)')
@@ -474,25 +486,46 @@ Examples:
         print_examples()
         os.sys.exit(1)
     
-    # Validate theme exists
     available_themes = get_available_themes()
-    if args.theme not in available_themes:
-        print(f"Error: Theme '{args.theme}' not found.")
-        print(f"Available themes: {', '.join(available_themes)}")
+    if not available_themes:
+        print("No themes found in 'themes/' directory.")
         os.sys.exit(1)
+
+    if args.all_themes:
+        themes_to_generate = available_themes
+    else:
+        if args.theme not in available_themes:
+            print(f"Error: Theme '{args.theme}' not found.")
+            print(f"Available themes: {', '.join(available_themes)}")
+            os.sys.exit(1)
+        themes_to_generate = [args.theme]
     
     print("=" * 50)
     print("City Map Poster Generator")
     print("=" * 50)
     
-    # Load theme
-    THEME = load_theme(args.theme)
-    
     # Get coordinates and generate poster
     try:
-        coords = get_coordinates(args.city, args.country)
-        output_file = generate_output_filename(args.city, args.theme, args.format)
-        create_poster(args.city, args.country, coords, args.distance, output_file, args.format)
+        if (args.latitude is None) ^ (args.longitude is None):
+            raise ValueError('If using coordinates, you must provide both --latitude and --longitude.')
+
+        if args.latitude is not None and args.longitude is not None:
+            coords = (args.latitude, args.longitude)
+        else:
+            coords = get_coordinates(args.city, args.country)
+        for theme_name in themes_to_generate:
+            THEME = load_theme(theme_name)
+            output_file = generate_output_filename(args.city, theme_name, args.format)
+            create_poster(
+                args.city,
+                args.country,
+                coords,
+                args.distance,
+                output_file,
+                args.format,
+                country_label=args.country_label,
+                name_label=args.name_label,
+            )
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
