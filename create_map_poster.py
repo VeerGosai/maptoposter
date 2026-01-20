@@ -36,7 +36,7 @@ def load_fonts():
 
 FONTS = load_fonts()
 
-def generate_output_filename(city, theme_name):
+def generate_output_filename(city, theme_name, output_format):
     """
     Generate unique output filename with city, theme, and datetime.
     """
@@ -45,7 +45,8 @@ def generate_output_filename(city, theme_name):
     
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     city_slug = city.lower().replace(' ', '_')
-    filename = f"{city_slug}_{theme_name}_{timestamp}.png"
+    ext = output_format.lower()
+    filename = f"{city_slug}_{theme_name}_{timestamp}.{ext}"
     return os.path.join(POSTERS_DIR, filename)
 
 def get_available_themes():
@@ -213,7 +214,7 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
 
-def create_poster(city, country, point, dist, output_file):
+def create_poster(city, country, point, dist, output_file, output_format):
     print(f"\nGenerating map for {city}, {country}...")
     
     # Progress bar for data fetching
@@ -318,9 +319,19 @@ def create_poster(city, country, point, dist, output_file):
 
     # 5. Save
     print(f"Saving to {output_file}...")
-    plt.savefig(output_file, dpi=300, facecolor=THEME['bg'])
+
+    fmt = output_format.lower()
+    save_kwargs = dict(facecolor=THEME["bg"], bbox_inches="tight", pad_inches=0.05,)
+
+    # DPI matters mainly for raster formats
+    if fmt == "png":
+        save_kwargs["dpi"] = 300
+
+    plt.savefig(output_file, format=fmt, **save_kwargs)
+
     plt.close()
     print(f"✓ Done! Poster saved as {output_file}")
+
 
 def print_examples():
     """Print usage examples."""
@@ -421,6 +432,7 @@ Examples:
     parser.add_argument('--theme', '-t', type=str, default='feature_based', help='Theme name (default: feature_based)')
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
+    parser.add_argument('--format', '-f', default='png', choices=['png', 'svg', 'pdf'],help='Output format for the poster (default: png)')
     
     args = parser.parse_args()
     
@@ -457,8 +469,8 @@ Examples:
     # Get coordinates and generate poster
     try:
         coords = get_coordinates(args.city, args.country)
-        output_file = generate_output_filename(args.city, args.theme)
-        create_poster(args.city, args.country, coords, args.distance, output_file)
+        output_file = generate_output_filename(args.city, args.theme, args.format)
+        create_poster(args.city, args.country, coords, args.distance, output_file, args.format)
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
