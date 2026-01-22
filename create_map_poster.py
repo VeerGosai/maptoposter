@@ -20,6 +20,7 @@ from hashlib import md5
 from typing import cast
 from geopandas import GeoDataFrame
 import pickle
+from shapely.geometry import Point
 
 class CacheError(Exception):
     """Raised when a cache operation fails."""
@@ -27,33 +28,8 @@ class CacheError(Exception):
 
 CACHE_DIR_PATH = os.environ.get("CACHE_DIR", "cache")
 CACHE_DIR = Path(CACHE_DIR_PATH)
-
 CACHE_DIR.mkdir(exist_ok=True)
 
-def cache_file(key: str) -> str:
-    encoded = md5(key.encode()).hexdigest()
-    return f"{encoded}.pkl"
-
-def cache_get(name: str) -> dict | None:
-    path = CACHE_DIR / cache_file(name)
-    if path.exists():
-        with path.open("rb") as f:
-            return pickle.load(f)
-    return None
-
-def cache_set(name: str, obj) -> None:
-    path = CACHE_DIR / cache_file(name)
-    try:
-        with path.open("wb") as f:
-            pickle.dump(obj, f)
-    except pickle.PickleError as e:
-        raise CacheError(
-            f"Serialization error while saving cache for '{name}': {e}"
-        ) from e
-    except (OSError, IOError) as e:
-        raise CacheError(
-            f"File error while saving cache for '{name}': {e}"
-        ) from e
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
@@ -321,57 +297,41 @@ def get_coordinates(city, country):
     else:
         raise ValueError(f"Could not find coordinates for {city}, {country}")
     
-def get_crop_limits(G: MultiDiGraph, fig: Figure) -> tuple[tuple[float, float], tuple[float, float]]:
+def get_crop_limits(G_proj, center_lat_lon, fig, dist):
     """
-    Determine cropping limits to maintain aspect ratio of the figure.
+    Crop inward to preserve aspect ratio while guaranteeing
+    full coverage of the requested radius.
+    """
+    lat, lon = center_lat_lon
 
-    This function calculates the extents of the graph's nodes and adjusts
-    the x and y limits to match the aspect ratio of the provided figure.
-    
-    :param G: The graph to be plotted
-    :type G: MultiDiGraph
-    :param fig: The matplotlib figure object
-    :type fig: Figure
-    :return: Tuple of x and y limits for cropping
-    :rtype: tuple[tuple[float, float], tuple[float, float]]
-    """
-    # Compute node extents in projected coordinates
-    xs = [data['x'] for _, data in G.nodes(data=True)]
-    ys = [data['y'] for _, data in G.nodes(data=True)]
-    minx, maxx = min(xs), max(xs)
-    miny, maxy = min(ys), max(ys)
-    x_range = maxx - minx
-    y_range = maxy - miny
+    # Project center point into graph CRS
+    center = (
+        ox.projection.project_geometry(
+            Point(lon, lat),
+            crs="EPSG:4326",
+            to_crs=G_proj.graph["crs"]
+        )[0]
+    )
+    center_x, center_y = center.x, center.y
 
     fig_width, fig_height = fig.get_size_inches()
-    desired_aspect = fig_width / fig_height
-    current_aspect = x_range / y_range
+    aspect = fig_width / fig_height
 
-    center_x = (minx + maxx) / 2
-    center_y = (miny + maxy) / 2
+    # Start from the *requested* radius
+    half_x = dist
+    half_y = dist
 
-    if current_aspect > desired_aspect:
-        # Too wide, need to crop horizontally
-        desired_x_range = y_range * desired_aspect
-        new_minx = center_x - desired_x_range / 2
-        new_maxx = center_x + desired_x_range / 2
-        new_miny, new_maxy = miny, maxy
-        crop_xlim = (new_minx, new_maxx)
-        crop_ylim = (new_miny, new_maxy)
-    elif current_aspect < desired_aspect:
-        # Too tall, need to crop vertically
-        desired_y_range = x_range / desired_aspect
-        new_miny = center_y - desired_y_range / 2
-        new_maxy = center_y + desired_y_range / 2
-        new_minx, new_maxx = minx, maxx
-        crop_xlim = (new_minx, new_maxx)
-        crop_ylim = (new_miny, new_maxy)
-    else:
-        # Otherwise, keep original extents (no horizontal crop)
-        crop_xlim = (minx, maxx)
-        crop_ylim = (miny, maxy)
-    
-    return crop_xlim, crop_ylim
+    # Cut inward to match aspect
+    if aspect > 1:  # landscape → reduce height
+        half_y = half_x / aspect
+    else:           # portrait → reduce width
+        half_x = half_y * aspect
+
+    return (
+        (center_x - half_x, center_x + half_x),
+        (center_y - half_y, center_y + half_y),
+    )
+
 
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     lat, lon = point
@@ -417,76 +377,35 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
         return None
 
 
-def fetch_graph(point, dist):
-    lat, lon = point
-    graph_key = f"graph_{lat}_{lon}_{dist}"
-    cached = cache_get(graph_key)
-    if cached is not None:
-        print("✓ Using cached street network")
-        return cached
 
-    try:
-        G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
-        time.sleep(0.5)
-        try:
-            cache_set(graph_key, G)
-        except CacheError as e:
-            print(e)
-        return G
-    except Exception as e:
-        print(f"OSMnx error while fetching graph: {e}")
-        return None
-
-
-def fetch_features(point, dist, tags, name):
-    lat, lon = point
-    tag_str = "_".join(sorted(tags.keys()))
-    features_key = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
-    cached = cache_get(features_key)
-    if cached is not None:
-        print(f"✓ Using cached {name}")
-        return cached
-
-    try:
-        data = ox.features_from_point(point, tags=tags, dist=dist)
-        time.sleep(0.3)
-        try:
-            cache_set(features_key, data)
-        except CacheError as e:
-            print(e)
-        return data
-    except Exception as e:
-        print(f"OSMnx error while fetching features: {e}")
-        return None
-
-
-def create_poster(city, country, point, dist, output_file, output_format, country_label=None, name_label=None):
+def create_poster(city, country, point, dist, output_file, output_format, width=12, height=16, country_label=None, name_label=None):
     print(f"\nGenerating map for {city}, {country}...")
     
     # Progress bar for data fetching
     with tqdm(total=3, desc="Fetching map data", unit="step", bar_format='{l_bar}{bar}| {n_fmt}/{total_fmt}') as pbar:
         # 1. Fetch Street Network
         pbar.set_description("Downloading street network")
-        G = fetch_graph(point, dist)
+        compensated_dist = dist * (max(height, width) / min(height, width))/4 # To compensate for viewport crop
+        G = fetch_graph(point, compensated_dist)
         if G is None:
             raise RuntimeError("Failed to retrieve street network data.")
         pbar.update(1)
         
         # 2. Fetch Water Features
         pbar.set_description("Downloading water features")
-        water = fetch_features(point, dist, tags={'natural': 'water', 'waterway': 'riverbank'}, name='water')
+        water = fetch_features(point, compensated_dist, tags={'natural': 'water', 'waterway': 'riverbank'}, name='water')
         pbar.update(1)
         
         # 3. Fetch Parks
         pbar.set_description("Downloading parks/green spaces")
-        parks = fetch_features(point, dist, tags={'leisure': 'park', 'landuse': 'grass'}, name='parks')
+        parks = fetch_features(point, compensated_dist, tags={'leisure': 'park', 'landuse': 'grass'}, name='parks')
         pbar.update(1)
     
     print("✓ All data retrieved successfully!")
     
     # 2. Setup Plot
     print("Rendering map...")
-    fig, ax = plt.subplots(figsize=(12, 16), facecolor=THEME['bg'])
+    fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME['bg'])
     ax.set_facecolor(THEME['bg'])
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
@@ -523,8 +442,7 @@ def create_poster(city, country, point, dist, output_file, output_format, countr
     edge_widths = get_edge_widths_by_type(G_proj)
 
     # Determine cropping limits to maintain the poster aspect ratio
-    crop_xlim, crop_ylim = get_crop_limits(G_proj, fig)
-
+    crop_xlim, crop_ylim = get_crop_limits(G_proj, point, fig, compensated_dist)
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
         G_proj, ax=ax, bgcolor=THEME['bg'],
@@ -718,6 +636,8 @@ Examples:
     parser.add_argument('--theme', '-t', type=str, default='feature_based', help='Theme name (default: feature_based)')
     parser.add_argument('--all-themes', '--All-themes', dest='all_themes', action='store_true', help='Generate posters for all themes')
     parser.add_argument('--distance', '-d', type=int, default=29000, help='Map radius in meters (default: 29000)')
+    parser.add_argument('--width', '-W', type=float, default=12, help='Image width in inches (default: 12)')
+    parser.add_argument('--height', '-H', type=float, default=16, help='Image height in inches (default: 16)')
     parser.add_argument('--list-themes', action='store_true', help='List all available themes')
     parser.add_argument('--format', '-f', default='png', choices=['png', 'svg', 'pdf'],help='Output format for the poster (default: png)')
     
@@ -763,7 +683,7 @@ Examples:
         for theme_name in themes_to_generate:
             THEME = load_theme(theme_name)
             output_file = generate_output_filename(args.city, theme_name, args.format)
-            create_poster(args.city, args.country, coords, args.distance, output_file, args.format, country_label=args.country_label)
+            create_poster(args.city, args.country, coords, args.distance, output_file, args.format, args.width, args.height, country_label=args.country_label)
         
         print("\n" + "=" * 50)
         print("✓ Poster generation complete!")
