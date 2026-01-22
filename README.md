@@ -44,6 +44,20 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 29000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
+| **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 |
+| **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 |
+
+### Resolution Guide (300 DPI)
+
+Use these values for `-W` and `-H` to target specific resolutions:
+
+| Target | Resolution (px) | Inches (-W / -H) |
+|--------|-----------------|------------------|
+| **Instagram Post** | 1080 x 1080 | 3.6 x 3.6 |
+| **Mobile Wallpaper** | 1080 x 1920 | 3.6 x 6.4 |
+| **HD Wallpaper** | 1920 x 1080 | 6.4 x 3.6 |
+| **4K Wallpaper** | 3840 x 2160 | 12.8 x 7.2 |
+| **A4 Print** | 2480 x 3508 | 8.3 x 11.7 |
 
 ### Examples
 

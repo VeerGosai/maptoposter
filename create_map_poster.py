@@ -459,30 +459,44 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
     
+    # Calculate scale factor based on poster width (reference width 12 inches)
+    scale_factor = width / 12.0
+    
+    # Base font sizes (at 12 inches width)
+    BASE_MAIN = 60
+    BASE_TOP = 40
+    BASE_SUB = 22
+    BASE_COORDS = 14
+    BASE_ATTR = 8
+    
     # 4. Typography using Roboto font
     if FONTS:
-        font_main = FontProperties(fname=FONTS['bold'], size=60)
-        font_top = FontProperties(fname=FONTS['bold'], size=40)
-        font_sub = FontProperties(fname=FONTS['light'], size=22)
-        font_coords = FontProperties(fname=FONTS['regular'], size=14)
+        font_main = FontProperties(fname=FONTS['bold'], size=BASE_MAIN * scale_factor)
+        font_top = FontProperties(fname=FONTS['bold'], size=BASE_TOP * scale_factor)
+        font_sub = FontProperties(fname=FONTS['light'], size=BASE_SUB * scale_factor)
+        font_coords = FontProperties(fname=FONTS['regular'], size=BASE_COORDS * scale_factor)
+        font_attr = FontProperties(fname=FONTS['light'], size=BASE_ATTR * scale_factor)
     else:
         # Fallback to system fonts
-        font_main = FontProperties(family='monospace', weight='bold', size=60)
-        font_top = FontProperties(family='monospace', weight='bold', size=40)
-        font_sub = FontProperties(family='monospace', weight='normal', size=22)
-        font_coords = FontProperties(family='monospace', size=14)
+        font_main = FontProperties(family='monospace', weight='bold', size=BASE_MAIN * scale_factor)
+        font_top = FontProperties(family='monospace', weight='bold', size=BASE_TOP * scale_factor)
+        font_sub = FontProperties(family='monospace', weight='normal', size=BASE_SUB * scale_factor)
+        font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
+        font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
     
     spaced_city = "  ".join(list(city.upper()))
     
     # Dynamically adjust font size based on city name length to prevent truncation
-    base_font_size = 60
+    # We use the already scaled "main" font size as the starting point.
+    base_adjusted_main = BASE_MAIN * scale_factor
     city_char_count = len(city)
+    
+    # Heuristic: If length is > 10, start reducing.
     if city_char_count > 10:
-        # Scale down font size for longer names
-        scale_factor = 10 / city_char_count
-        adjusted_font_size = max(base_font_size * scale_factor, 24)  # Minimum size of 24
+        length_factor = 10 / city_char_count
+        adjusted_font_size = max(base_adjusted_main * length_factor, 10 * scale_factor) 
     else:
-        adjusted_font_size = base_font_size
+        adjusted_font_size = base_adjusted_main
     
     if FONTS:
         font_main_adjusted = FontProperties(fname=FONTS['bold'], size=adjusted_font_size)
@@ -506,7 +520,7 @@ def create_poster(city, country, point, dist, output_file, output_format, width=
             color=THEME['text'], alpha=0.7, ha='center', fontproperties=font_coords, zorder=11)
     
     ax.plot([0.4, 0.6], [0.125, 0.125], transform=ax.transAxes, 
-            color=THEME['text'], linewidth=1, zorder=11)
+            color=THEME['text'], linewidth=1 * scale_factor, zorder=11)
 
     # --- ATTRIBUTION (bottom right) ---
     if FONTS:
