@@ -382,7 +382,7 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
         return cast(MultiDiGraph, cached)
 
     try:
-        G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all')
+        G = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all', truncate_by_edge=True)
         # Rate limit between requests
         time.sleep(0.5)
         try:
