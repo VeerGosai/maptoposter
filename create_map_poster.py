@@ -21,6 +21,7 @@ from typing import cast
 from geopandas import GeoDataFrame
 import pickle
 from shapely.geometry import Point
+from lat_lon_parser import parse
 
 class CacheError(Exception):
     """Raised when a cache operation fails."""
@@ -635,6 +636,7 @@ if __name__ == "__main__":
         epilog="""
 Examples:
   python create_map_poster.py --city "New York" --country "USA"
+  python create_map_poster.py --city "New York" --country "USA" -l 40.776676 -73.971321 --theme neon_cyberpunk
   python create_map_poster.py --city Tokyo --country Japan --theme midnight_blue
   python create_map_poster.py --city Paris --country France --theme noir --distance 15000
   python create_map_poster.py --list-themes
@@ -643,6 +645,8 @@ Examples:
     
     parser.add_argument('--city', '-c', type=str, help='City name')
     parser.add_argument('--country', '-C', type=str, help='Country name')
+    parser.add_argument('--latitude', '-lat', dest='latitude', type=str, help='Override latitude center point')
+    parser.add_argument('--longitude', '-long', dest='longitude', type=str, help='Override longitude center point')
     parser.add_argument('--country-label', dest='country_label', type=str, help='Override country text displayed on poster')
     parser.add_argument('--theme', '-t', type=str, default='feature_based', help='Theme name (default: feature_based)')
     parser.add_argument('--all-themes', '--All-themes', dest='all_themes', action='store_true', help='Generate posters for all themes')
@@ -700,7 +704,14 @@ Examples:
     
     # Get coordinates and generate poster
     try:
-        coords = get_coordinates(args.city, args.country)
+        if args.latitude and args.longitude:
+            lat = parse(args.latitude)
+            lon = parse(args.longitude)
+            coords = [lat, lon]
+            print(f"✓ Coordinates: {', '.join([str(i) for i in coords])}")
+        else:
+            coords = get_coordinates(args.city, args.country)
+
         for theme_name in themes_to_generate:
             THEME = load_theme(theme_name)
             output_file = generate_output_filename(args.city, theme_name, args.format)
