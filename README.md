@@ -43,7 +43,7 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (must also supply latitude) | |
 | **OPTIONAL:** `--name` | | Override display name (city display on poster) | |
 | **OPTIONAL:** `--country-label` | | Override display country (country display on poster) | |
-| **OPTIONAL:** `--theme` | `-t` | Theme name | feature_based |
+| **OPTIONAL:** `--theme` | `-t` | Theme name | terracotta |
 | **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
@@ -116,7 +116,6 @@ python create_map_poster.py -c "Tokyo" -C "Japan" --all-themes
 
 | Theme | Style |
 |-------|-------|
-| `feature_based` | Classic black & white with road hierarchy |
 | `gradient_roads` | Smooth gradient shading |
 | `contrast_zones` | High contrast urban density |
 | `noir` | Pure black background, white roads |
