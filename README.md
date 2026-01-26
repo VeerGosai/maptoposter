@@ -29,16 +29,27 @@ pip install -r requirements.txt
 
 ## Usage
 
+### Generate Poster
+```bash
+python create_map_poster.py --city "Paris" --country "France"
+```
+
+### Full Syntax
 ```bash
 python create_map_poster.py --city <city> --country <country> [options]
 ```
 
-### Options
+### Required Options
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--city` | `-c` | City name (used for geocoding) |
+| `--country` | `-C` | Country name (used for geocoding) |
+
+### Optional Flags
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| `--city` | `-c` | City name | required |
-| `--country` | `-C` | Country name | required |
 | **OPTIONAL:** `--latitude` | `-lat` | Override latitude center point (must also supply longitude) | |
 | **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (must also supply latitude) | |
 | **OPTIONAL:** `--name` | | Override display name (city display on poster) | |
@@ -49,6 +60,31 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
+
+### Multilingual Support - i18n
+
+Display city and country names in your language with custom fonts from google fonts:
+
+| Option | Short | Description |
+|--------|-------|-------------|
+| `--display-city` | `-dc` | Custom display name for city (e.g., "東京") |
+| `--display-country` | `-dC` | Custom display name for country (e.g., "日本") |
+| `--font-family` | | Google Fonts family name (e.g., "Noto Sans JP") |
+
+**Examples:**
+
+```bash
+# Japanese
+python create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP"
+
+# Korean
+python create_map_poster.py -c "Seoul" -C "South Korea" -dc "서울" -dC "대한민국" --font-family "Noto Sans KR"
+
+# Arabic
+python create_map_poster.py -c "Dubai" -C "UAE" -dc "دبي" -dC "الإمارات" --font-family "Cairo"
+```
+
+**Note**: Fonts are automatically downloaded from Google Fonts and cached locally in `fonts/cache/`.
 
 ### Resolution Guide (300 DPI)
 
@@ -64,6 +100,40 @@ Use these values for `-W` and `-H` to target specific resolutions:
 
 ### Examples
 
+#### Basic Examples
+```bash
+# Simple usage with default theme
+python create_map_poster.py -c "Paris" -C "France"
+
+# With custom theme and distance
+python create_map_poster.py -c "New York" -C "USA" -t noir -d 12000
+```
+
+#### Multilingual Examples (Non-Latin Scripts)
+
+Display city names in their native scripts:
+
+```bash
+# Japanese
+python create_map_poster.py -c "Tokyo" -C "Japan" -dc "東京" -dC "日本" --font-family "Noto Sans JP" -t japanese_ink
+
+# Korean
+python create_map_poster.py -c "Seoul" -C "South Korea" -dc "서울" -dC "대한민국" --font-family "Noto Sans KR" -t midnight_blue
+
+# Thai
+python create_map_poster.py -c "Bangkok" -C "Thailand" -dc "กรุงเทพมหานคร" -dC "ประเทศไทย" --font-family "Noto Sans Thai" -t sunset
+
+# Arabic
+python create_map_poster.py -c "Dubai" -C "UAE" -dc "دبي" -dC "الإمارات" --font-family "Cairo" -t terracotta
+
+# Chinese (Simplified)
+python create_map_poster.py -c "Beijing" -C "China" -dc "北京" -dC "中国" --font-family "Noto Sans SC"
+
+# Khmer
+python create_map_poster.py -c "Phnom Penh" -C "Cambodia" -dc "ភ្នំពេញ" -dC "កម្ពុជា" --font-family "Noto Sans Khmer"
+```
+
+#### Advanced Examples
 ```bash
 # Iconic grid patterns
 python create_map_poster.py -c "New York" -C "USA" -t noir -d 12000           # Manhattan grid
@@ -167,10 +237,13 @@ Create a JSON file in `themes/` directory:
 
 ```
 map_poster/
-├── create_map_poster.py          # Main script
-├── themes/               # Theme JSON files
-├── fonts/                # Roboto font files
-├── posters/              # Generated posters
+├── create_map_poster.py    # Main script
+├── font_management.py      # Font loading and Google Fonts integration
+├── themes/                 # Theme JSON files
+├── fonts/                  # Font files
+│   ├── Roboto-*.ttf        # Default Roboto fonts
+│   └── cache/              # Downloaded Google Fonts (auto-generated)
+├── posters/                # Generated posters
 └── README.md
 ```
 
@@ -203,6 +276,8 @@ Quick reference for contributors who want to extend or modify the script.
 | `get_edge_widths_by_type()` | Road width by importance | Adjusting line weights |
 | `create_gradient_fade()` | Top/bottom fade effect | Modifying gradient overlay |
 | `load_theme()` | JSON theme → dict | Adding new theme properties |
+| `is_latin_script()` | Detects script for typography | Supporting new scripts |
+| `load_fonts()` | Load custom/default fonts | Changing font loading logic |
 
 ### Rendering Layers (z-order)
 
@@ -225,6 +300,15 @@ secondary                   → Medium (0.8)
 tertiary                    → Thin (0.6)
 residential, living_street  → Thinnest (0.4), lightest
 ```
+
+### Typography & Script Detection
+
+The script automatically detects text scripts to apply appropriate typography:
+
+- **Latin scripts** (English, French, Spanish, etc.): Letter spacing applied for elegant "P  A  R  I  S" effect
+- **Non-Latin scripts** (Japanese, Arabic, Thai, Korean, etc.): Natural spacing for "東京" (no gaps between characters)
+
+Script detection uses Unicode ranges (U+0000-U+024F for Latin). If >80% of alphabetic characters are Latin, spacing is applied.
 
 ### Adding New Features
 
@@ -250,7 +334,7 @@ if railways is not None and not railways.empty:
 
 All text uses `transform=ax.transAxes` (0-1 normalized coordinates):
 ```
-y=0.14  City name (spaced letters)
+y=0.14  City name (spaced letters for Latin scripts)
 y=0.125 Decorative line
 y=0.10  Country name
 y=0.07  Coordinates
