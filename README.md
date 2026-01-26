@@ -42,11 +42,11 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--name` | | Override display name (city display on poster) | |
 | **OPTIONAL:** `--country-label` | | Override display country (country display on poster) | |
 | **OPTIONAL:** `--theme` | `-t` | Theme name | feature_based |
-| **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 29000 |
+| **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
-| **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 |
-| **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 |
+| **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
+| **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
 
 ### Resolution Guide (300 DPI)
 
