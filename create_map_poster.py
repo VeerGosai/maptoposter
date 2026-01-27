@@ -1,28 +1,34 @@
-from matplotlib.figure import Figure
-from networkx import MultiDiGraph
-import osmnx as ox
-import matplotlib.pyplot as plt
-from matplotlib.font_manager import FontProperties
-import matplotlib.colors as mcolors
-import numpy as np
-from geopy.geocoders import Nominatim
-from tqdm import tqdm
-import time
+"""
+City Map Poster Generator
+
+This module generates beautiful, minimalist map posters for any city in the world.
+It fetches OpenStreetMap data using OSMnx, applies customizable themes, and creates
+high-quality poster-ready images with roads, water features, and parks.
+"""
+
+import argparse
+import asyncio
 import json
 import os
+import pickle
 import sys
+import time
 from datetime import datetime
-import argparse
-import pickle
-import asyncio
 from pathlib import Path
-from hashlib import md5
 from typing import cast
+
+import matplotlib.colors as mcolors
+import matplotlib.pyplot as plt
+import numpy as np
+import osmnx as ox
 from geopandas import GeoDataFrame
-import pickle
-from shapely.geometry import Point
+from geopy.geocoders import Nominatim
 from lat_lon_parser import parse
 from font_management import load_fonts
+from matplotlib.font_manager import FontProperties
+from networkx import MultiDiGraph
+from shapely.geometry import Point
+from tqdm import tqdm
 
 
 class CacheError(Exception):
@@ -39,13 +45,35 @@ THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
 POSTERS_DIR = "posters"
 
+FONTS = load_fonts()
 
 def _cache_path(key: str) -> str:
+    """
+    Generate a safe cache file path from a cache key.
+
+    Args:
+        key: Cache key identifier
+
+    Returns:
+        Path to cache file with .pkl extension
+    """
     safe = key.replace(os.sep, "_")
     return os.path.join(CACHE_DIR, f"{safe}.pkl")
 
 
 def cache_get(key: str):
+    """
+    Retrieve a cached object by key.
+
+    Args:
+        key: Cache key identifier
+
+    Returns:
+        Cached object if found, None otherwise
+
+    Raises:
+        CacheError: If cache read operation fails
+    """
     try:
         path = _cache_path(key)
         if not os.path.exists(path):
@@ -53,10 +81,20 @@ def cache_get(key: str):
         with open(path, "rb") as f:
             return pickle.load(f)
     except Exception as e:
-        raise CacheError(f"Cache read failed: {e}")
+        raise CacheError(f"Cache read failed: {e}") from e
 
 
 def cache_set(key: str, value):
+    """
+    Store an object in the cache.
+
+    Args:
+        key: Cache key identifier
+        value: Object to cache (must be picklable)
+
+    Raises:
+        CacheError: If cache write operation fails
+    """
     try:
         if not os.path.exists(CACHE_DIR):
             os.makedirs(CACHE_DIR)
@@ -64,7 +102,7 @@ def cache_set(key: str, value):
         with open(path, "wb") as f:
             pickle.dump(value, f, protocol=pickle.HIGHEST_PROTOCOL)
     except Exception as e:
-        raise CacheError(f"Cache write failed: {e}")
+        raise CacheError(f"Cache write failed: {e}") from e
 
 
 # Font loading now handled by font_management.py module
@@ -101,9 +139,6 @@ def is_latin_script(text):
 
     # Consider it Latin if >80% of alphabetic characters are Latin
     return (latin_count / total_alpha) > 0.8
-
-
-FONTS = load_fonts()
 
 
 def generate_output_filename(city, theme_name, output_format):
@@ -174,19 +209,7 @@ THEME = dict[str, str]()  # Will be loaded later
 
 
 def create_gradient_fade(ax, color, location="bottom", zorder=10):
-    """
-    Creates a fade effect at the top or bottom of the map.
-    """
-    vals = np.linspace(0, 1, 256).reshape(-1, 1)
-    gradient = np.hstack((vals, vals))
-
-    rgb = mcolors.to_rgb(color)
-    my_colors = np.zeros((256, 4))
-    my_colors[:, 0] = rgb[0]
-    my_colors[:, 1] = rgb[1]
-    my_colors[:, 2] = rgb[2]
-
-    if location == "bottom":
+    if location == 'bottom':
         my_colors[:, 3] = np.linspace(1, 0, 256)
         extent_y_start = 0
         extent_y_end = 0.25
@@ -204,30 +227,24 @@ def create_gradient_fade(ax, color, location="bottom", zorder=10):
     y_bottom = ylim[0] + y_range * extent_y_start
     y_top = ylim[0] + y_range * extent_y_end
 
-    ax.imshow(
-        gradient,
-        extent=[xlim[0], xlim[1], y_bottom, y_top],
-        aspect="auto",
-        cmap=custom_cmap,
-        zorder=zorder,
-        origin="lower",
-    )
+    ax.imshow(gradient, extent=[xlim[0], xlim[1], y_bottom, y_top],
+              aspect='auto', cmap=custom_cmap, zorder=zorder, origin='lower')
 
 
-def get_edge_colors_by_type(G):
+def get_edge_colors_by_type(g):
     """
     Assigns colors to edges based on road type hierarchy.
     Returns a list of colors corresponding to each edge in the graph.
     """
     edge_colors = []
 
-    for u, v, data in G.edges(data=True):
+    for _u, _v, data in g.edges(data=True):
         # Get the highway type (can be a list or string)
-        highway = data.get("highway", "unclassified")
+        highway = data.get('highway', 'unclassified')
 
         # Handle list of highway types (take the first one)
         if isinstance(highway, list):
-            highway = highway[0] if highway else "unclassified"
+            highway = highway[0] if highway else 'unclassified'
 
         # Assign color based on road type
         if highway in ["motorway", "motorway_link"]:
@@ -241,25 +258,25 @@ def get_edge_colors_by_type(G):
         elif highway in ["residential", "living_street", "unclassified"]:
             color = THEME["road_residential"]
         else:
-            color = THEME["road_default"]
+            color = THEME['road_default']
 
         edge_colors.append(color)
 
     return edge_colors
 
 
-def get_edge_widths_by_type(G):
+def get_edge_widths_by_type(g):
     """
     Assigns line widths to edges based on road type.
     Major roads get thicker lines.
     """
     edge_widths = []
 
-    for u, v, data in G.edges(data=True):
-        highway = data.get("highway", "unclassified")
+    for _u, _v, data in g.edges(data=True):
+        highway = data.get('highway', 'unclassified')
 
         if isinstance(highway, list):
-            highway = highway[0] if highway else "unclassified"
+            highway = highway[0] if highway else 'unclassified'
 
         # Assign width based on road importance
         if highway in ["motorway", "motorway_link"]:
@@ -298,20 +315,21 @@ def get_coordinates(city, country):
     try:
         location = geolocator.geocode(f"{city}, {country}")
     except Exception as e:
-        raise ValueError(f"Geocoding failed for {city}, {country}: {e}")
+        raise ValueError(f"Geocoding failed for {city}, {country}: {e}") from e
 
     # If geocode returned a coroutine in some environments, run it to get the result.
     if asyncio.iscoroutine(location):
         try:
             location = asyncio.run(location)
-        except RuntimeError:
+        except RuntimeError as exc:
             # If an event loop is already running, try using it to complete the coroutine.
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # Running event loop in the same thread; raise a clear error.
                 raise RuntimeError(
-                    "Geocoder returned a coroutine while an event loop is already running. Run this script in a synchronous environment."
-                )
+                    "Geocoder returned a coroutine while an event loop is already running. "
+                    "Run this script in a synchronous environment."
+                ) from exc
             location = loop.run_until_complete(location)
 
     if location:
@@ -327,11 +345,11 @@ def get_coordinates(city, country):
         except CacheError as e:
             print(e)
         return (location.latitude, location.longitude)
-    else:
-        raise ValueError(f"Could not find coordinates for {city}, {country}")
+
+    raise ValueError(f"Could not find coordinates for {city}, {country}")
 
 
-def get_crop_limits(G_proj, center_lat_lon, fig, dist):
+def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     """
     Crop inward to preserve aspect ratio while guaranteeing
     full coverage of the requested radius.
@@ -339,9 +357,13 @@ def get_crop_limits(G_proj, center_lat_lon, fig, dist):
     lat, lon = center_lat_lon
 
     # Project center point into graph CRS
-    center = ox.projection.project_geometry(
-        Point(lon, lat), crs="EPSG:4326", to_crs=G_proj.graph["crs"]
-    )[0]
+    center = (
+        ox.projection.project_geometry(
+            Point(lon, lat),
+            crs="EPSG:4326",
+            to_crs=g_proj.graph["crs"]
+        )[0]
+    )
     center_x, center_y = center.x, center.y
 
     fig_width, fig_height = fig.get_size_inches()
@@ -364,6 +386,19 @@ def get_crop_limits(G_proj, center_lat_lon, fig, dist):
 
 
 def fetch_graph(point, dist) -> MultiDiGraph | None:
+    """
+    Fetch street network graph from OpenStreetMap.
+
+    Uses caching to avoid redundant downloads. Fetches all network types
+    within the specified distance from the center point.
+
+    Args:
+        point: (latitude, longitude) tuple for center point
+        dist: Distance in meters from center point
+
+    Returns:
+        MultiDiGraph of street network, or None if fetch fails
+    """
     lat, lon = point
     graph = f"graph_{lat}_{lon}_{dist}"
     cached = cache_get(graph)
@@ -372,26 +407,35 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
         return cast(MultiDiGraph, cached)
 
     try:
-        G = ox.graph_from_point(
-            point,
-            dist=dist,
-            dist_type="bbox",
-            network_type="all",
-            truncate_by_edge=True,
-        )
+        g = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all', truncate_by_edge=True)
         # Rate limit between requests
         time.sleep(0.5)
         try:
-            cache_set(graph, G)
+            cache_set(graph, g)
         except CacheError as e:
             print(e)
-        return G
+        return g
     except Exception as e:
         print(f"OSMnx error while fetching graph: {e}")
         return None
 
 
 def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
+    """
+    Fetch geographic features (water, parks, etc.) from OpenStreetMap.
+
+    Uses caching to avoid redundant downloads. Fetches features matching
+    the specified OSM tags within distance from center point.
+
+    Args:
+        point: (latitude, longitude) tuple for center point
+        dist: Distance in meters from center point
+        tags: Dictionary of OSM tags to filter features
+        name: Name for this feature type (for caching and logging)
+
+    Returns:
+        GeoDataFrame of features, or None if fetch fails
+    """
     lat, lon = point
     tag_str = "_".join(tags.keys())
     features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
@@ -429,6 +473,27 @@ def create_poster(
     display_country=None,
     fonts=None,
 ):
+    """
+    Generate a complete map poster with roads, water, parks, and typography.
+
+    Creates a high-quality poster by fetching OSM data, rendering map layers,
+    applying the current theme, and adding text labels with coordinates.
+
+    Args:
+        city: City name for display on poster
+        country: Country name for display on poster
+        point: (latitude, longitude) tuple for map center
+        dist: Map radius in meters
+        output_file: Path where poster will be saved
+        output_format: File format ('png', 'svg', or 'pdf')
+        width: Poster width in inches (default: 12)
+        height: Poster height in inches (default: 16)
+        country_label: Optional override for country text on poster
+        _name_label: Optional override for city name (unused, reserved for future use)
+
+    Raises:
+        RuntimeError: If street network data cannot be retrieved
+    """
     # Handle display names for i18n support
     # Priority: display_city/display_country > name_label/country_label > city/country
     display_city = display_city or name_label or city
@@ -445,11 +510,9 @@ def create_poster(
     ) as pbar:
         # 1. Fetch Street Network
         pbar.set_description("Downloading street network")
-        compensated_dist = (
-            dist * (max(height, width) / min(height, width)) / 4
-        )  # To compensate for viewport crop
-        G = fetch_graph(point, compensated_dist)
-        if G is None:
+        compensated_dist = dist * (max(height, width) / min(height, width)) / 4  # To compensate for viewport crop
+        g = fetch_graph(point, compensated_dist)
+        if g is None:
             raise RuntimeError("Failed to retrieve street network data.")
         pbar.update(1)
 
@@ -482,7 +545,7 @@ def create_poster(
     ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
-    G_proj = ox.project_graph(G)
+    g_proj = ox.project_graph(g)
 
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
@@ -494,10 +557,8 @@ def create_poster(
             try:
                 water_polys = ox.projection.project_gdf(water_polys)
             except Exception:
-                water_polys = water_polys.to_crs(G_proj.graph["crs"])
-            water_polys.plot(
-                ax=ax, facecolor=THEME["water"], edgecolor="none", zorder=1
-            )
+                water_polys = water_polys.to_crs(g_proj.graph['crs'])
+            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
@@ -507,23 +568,20 @@ def create_poster(
             try:
                 parks_polys = ox.projection.project_gdf(parks_polys)
             except Exception:
-                parks_polys = parks_polys.to_crs(G_proj.graph["crs"])
-            parks_polys.plot(
-                ax=ax, facecolor=THEME["parks"], edgecolor="none", zorder=2
-            )
+                parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
+            parks_polys.plot(ax=ax, 
+                facecolor=THEME['parks'], edgecolor='none', zorder=2)
 
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(G_proj)
-    edge_widths = get_edge_widths_by_type(G_proj)
+    edge_colors = get_edge_colors_by_type(g_proj)
+    edge_widths = get_edge_widths_by_type(g_proj)
 
     # Determine cropping limits to maintain the poster aspect ratio
-    crop_xlim, crop_ylim = get_crop_limits(G_proj, point, fig, compensated_dist)
+    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
     # Plot the projected graph and then apply the cropped limits
     ox.plot_graph(
-        G_proj,
-        ax=ax,
-        bgcolor=THEME["bg"],
+        g_proj, ax=ax, bgcolor=THEME['bg'],
         node_size=0,
         edge_color=edge_colors,
         edge_linewidth=edge_widths,
@@ -535,68 +593,35 @@ def create_poster(
     ax.set_ylim(crop_ylim)
 
     # Layer 3: Gradients (Top and Bottom)
-    create_gradient_fade(ax, THEME["gradient_color"], location="bottom", zorder=10)
-    create_gradient_fade(ax, THEME["gradient_color"], location="top", zorder=10)
+    create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
+    create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
     # Calculate scale factor based on poster width (reference width 12 inches)
     scale_factor = width / 12.0
 
     # Base font sizes (at 12 inches width)
     BASE_MAIN = 60
-    BASE_TOP = 40
     BASE_SUB = 22
     BASE_COORDS = 14
     BASE_ATTR = 8
 
-    # 4. Typography - use custom fonts if provided, otherwise use default FONTS
-    active_fonts = fonts or FONTS
-    if active_fonts:
-        font_main = FontProperties(
-            fname=active_fonts["bold"], size=BASE_MAIN * scale_factor
-        )
-        font_top = FontProperties(
-            fname=active_fonts["bold"], size=BASE_TOP * scale_factor
-        )
-        font_sub = FontProperties(
-            fname=active_fonts["light"], size=BASE_SUB * scale_factor
-        )
-        font_coords = FontProperties(
-            fname=active_fonts["regular"], size=BASE_COORDS * scale_factor
-        )
-        font_attr = FontProperties(
-            fname=active_fonts["light"], size=BASE_ATTR * scale_factor
-        )
+    # 4. Typography using Roboto font
+    if FONTS:
+        font_sub = FontProperties(fname=FONTS['light'], size=BASE_SUB * scale_factor)
+        font_coords = FontProperties(fname=FONTS['regular'], size=BASE_COORDS * scale_factor)
+        font_attr = FontProperties(fname=FONTS['light'], size=BASE_ATTR * scale_factor)
     else:
         # Fallback to system fonts
-        font_main = FontProperties(
-            family="monospace", weight="bold", size=BASE_MAIN * scale_factor
-        )
-        font_top = FontProperties(
-            family="monospace", weight="bold", size=BASE_TOP * scale_factor
-        )
-        font_sub = FontProperties(
-            family="monospace", weight="normal", size=BASE_SUB * scale_factor
-        )
-        font_coords = FontProperties(
-            family="monospace", size=BASE_COORDS * scale_factor
-        )
-        font_attr = FontProperties(family="monospace", size=BASE_ATTR * scale_factor)
+        font_sub = FontProperties(family='monospace', weight='normal', size=BASE_SUB * scale_factor)
+        font_coords = FontProperties(family='monospace', size=BASE_COORDS * scale_factor)
+        font_attr = FontProperties(family='monospace', size=BASE_ATTR * scale_factor)
 
-    # Format city name based on script type
-    # Latin scripts: apply uppercase and letter spacing for aesthetic
-    # Non-Latin scripts (CJK, Thai, Arabic, etc.): no spacing, preserve case structure
-    if is_latin_script(display_city):
-        # Latin script: uppercase with letter spacing (e.g., "P  A  R  I  S")
-        spaced_city = "  ".join(list(display_city.upper()))
-    else:
-        # Non-Latin script: no spacing, no forced uppercase
-        # For scripts like Arabic, Thai, Japanese, etc.
-        spaced_city = display_city
+    spaced_city = "  ".join(list(city.upper()))
 
     # Dynamically adjust font size based on city name length to prevent truncation
     # We use the already scaled "main" font size as the starting point.
     base_adjusted_main = BASE_MAIN * scale_factor
-    city_char_count = len(display_city)
+    city_char_count = len(city)
 
     # Heuristic: If length is > 10, start reducing.
     if city_char_count > 10:
@@ -615,27 +640,12 @@ def create_poster(
         )
 
     # --- BOTTOM TEXT ---
-    ax.text(
-        0.5,
-        0.14,
-        spaced_city,
-        transform=ax.transAxes,
-        color=THEME["text"],
-        ha="center",
-        fontproperties=font_main_adjusted,
-        zorder=11,
-    )
+    ax.text(0.5, 0.14, spaced_city, transform=ax.transAxes,
+            color=THEME['text'], ha='center', fontproperties=font_main_adjusted, zorder=11)
 
-    ax.text(
-        0.5,
-        0.10,
-        display_country.upper(),
-        transform=ax.transAxes,
-        color=THEME["text"],
-        ha="center",
-        fontproperties=font_sub,
-        zorder=11,
-    )
+    country_text = country_label if country_label is not None else country
+    ax.text(0.5, 0.10, country_text.upper(), transform=ax.transAxes,
+            color=THEME['text'], ha='center', fontproperties=font_sub, zorder=11)
 
     lat, lon = point
     coords = (
@@ -719,30 +729,30 @@ Examples:
   # Iconic grid patterns
   python create_map_poster.py -c "New York" -C "USA" -t noir -d 12000           # Manhattan grid
   python create_map_poster.py -c "Barcelona" -C "Spain" -t warm_beige -d 8000   # Eixample district grid
-  
+
   # Waterfront & canals
   python create_map_poster.py -c "Venice" -C "Italy" -t blueprint -d 4000       # Canal network
   python create_map_poster.py -c "Amsterdam" -C "Netherlands" -t ocean -d 6000  # Concentric canals
   python create_map_poster.py -c "Dubai" -C "UAE" -t midnight_blue -d 15000     # Palm & coastline
-  
+
   # Radial patterns
   python create_map_poster.py -c "Paris" -C "France" -t pastel_dream -d 10000   # Haussmann boulevards
   python create_map_poster.py -c "Moscow" -C "Russia" -t noir -d 12000          # Ring roads
-  
+
   # Organic old cities
   python create_map_poster.py -c "Tokyo" -C "Japan" -t japanese_ink -d 15000    # Dense organic streets
   python create_map_poster.py -c "Marrakech" -C "Morocco" -t terracotta -d 5000 # Medina maze
   python create_map_poster.py -c "Rome" -C "Italy" -t warm_beige -d 8000        # Ancient street layout
-  
+
   # Coastal cities
   python create_map_poster.py -c "San Francisco" -C "USA" -t sunset -d 10000    # Peninsula grid
   python create_map_poster.py -c "Sydney" -C "Australia" -t ocean -d 12000      # Harbor city
   python create_map_poster.py -c "Mumbai" -C "India" -t contrast_zones -d 18000 # Coastal peninsula
-  
+
   # River cities
   python create_map_poster.py -c "London" -C "UK" -t noir -d 15000              # Thames curves
   python create_map_poster.py -c "Budapest" -C "Hungary" -t copper_patina -d 8000  # Danube split
-  
+
   # List themes
   python create_map_poster.py --list-themes
 
@@ -779,9 +789,9 @@ def list_themes():
         try:
             with open(theme_path, "r") as f:
                 theme_data = json.load(f)
-                display_name = theme_data.get("name", theme_name)
-                description = theme_data.get("description", "")
-        except:
+                display_name = theme_data.get('name', theme_name)
+                description = theme_data.get('description', '')
+        except (OSError, json.JSONDecodeError):
             display_name = theme_name
             description = ""
         print(f"  {theme_name}")
@@ -923,7 +933,7 @@ Examples:
     available_themes = get_available_themes()
     if not available_themes:
         print("No themes found in 'themes/' directory.")
-        os.sys.exit(1)
+        sys.exit(1)
 
     if args.all_themes:
         themes_to_generate = available_themes
@@ -931,7 +941,7 @@ Examples:
         if args.theme not in available_themes:
             print(f"Error: Theme '{args.theme}' not found.")
             print(f"Available themes: {', '.join(available_themes)}")
-            os.sys.exit(1)
+            sys.exit(1)
         themes_to_generate = [args.theme]
 
     print("=" * 50)
