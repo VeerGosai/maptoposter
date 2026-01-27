@@ -47,6 +47,7 @@ POSTERS_DIR = "posters"
 
 FONTS = load_fonts()
 
+
 def _cache_path(key: str) -> str:
     """
     Generate a safe cache file path from a cache key.
@@ -587,9 +588,7 @@ def create_poster(
                 parks_polys = ox.projection.project_gdf(parks_polys)
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
-            parks_polys.plot(ax=ax, 
-                facecolor=THEME['parks'], edgecolor='none', zorder=2)
-
+            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
@@ -619,23 +618,15 @@ def create_poster(
 
     # Base font sizes (at 12 inches width)
     BASE_MAIN = 60
-    BASE_TOP = 40
     BASE_SUB = 22
     BASE_COORDS = 14
     BASE_ATTR = 8
-
 
     # 4. Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
     # 4. Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
     if active_fonts:
-        font_main = FontProperties(
-            fname=active_fonts["bold"], size=BASE_MAIN * scale_factor
-        )
-        font_top = FontProperties(
-            fname=active_fonts["bold"], size=BASE_TOP * scale_factor
-        )
         font_sub = FontProperties(
             fname=active_fonts["light"], size=BASE_SUB * scale_factor
         )
@@ -646,13 +637,6 @@ def create_poster(
             fname=active_fonts["light"], size=BASE_ATTR * scale_factor
         )
     else:
-        # Fallback to system fonts
-        font_main = FontProperties(
-            family="monospace", weight="bold", size=BASE_MAIN * scale_factor
-        )
-        font_top = FontProperties(
-            family="monospace", weight="bold", size=BASE_TOP * scale_factor
-        )
         font_sub = FontProperties(
             family="monospace", weight="normal", size=BASE_SUB * scale_factor
         )
@@ -783,7 +767,6 @@ def create_poster(
 
     plt.close()
     print(f"✓ Done! Poster saved as {output_file}")
-
 
 
 def print_examples():
