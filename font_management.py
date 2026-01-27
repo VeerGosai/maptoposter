@@ -4,7 +4,7 @@ Handles font loading, Google Fonts integration, and caching.
 """
 
 import os
-import urllib.request
+import requests
 import re
 from pathlib import Path
 from typing import Optional
@@ -35,16 +35,19 @@ def download_google_font(font_family: str, weights: list = None) -> Optional[dic
 
     try:
         # Google Fonts API endpoint - request all weights at once
-        font_name_encoded = font_family.replace(" ", "+")
         weights_str = ";".join(map(str, weights))
-        api_url = f"https://fonts.googleapis.com/css2?family={font_name_encoded}:wght@{weights_str}"
+        api_url = "https://fonts.googleapis.com/css2"
 
-        # Set user agent to get .woff2 files (better compression)
-        req = urllib.request.Request(api_url, headers={"User-Agent": "Mozilla/5.0"})
+        # Use requests library for cleaner HTTP handling
+        params = {"family": f"{font_family}:wght@{weights_str}"}
+        headers = {
+            "User-Agent": "Mozilla/5.0"  # Get .woff2 files (better compression)
+        }
 
         # Fetch CSS file
-        with urllib.request.urlopen(req, timeout=10) as response:
-            css_content = response.read().decode("utf-8")
+        response = requests.get(api_url, params=params, headers=headers, timeout=10)
+        response.raise_for_status()
+        css_content = response.text
 
         # Parse CSS to extract weight-specific URLs
         # Google Fonts CSS has @font-face blocks with font-weight and src: url()
@@ -98,7 +101,9 @@ def download_google_font(font_family: str, weights: list = None) -> Optional[dic
                 if not font_path.exists():
                     print(f"  Downloading {font_family} {weight_key} ({weight})...")
                     try:
-                        urllib.request.urlretrieve(weight_url, font_path)
+                        font_response = requests.get(weight_url, timeout=10)
+                        font_response.raise_for_status()
+                        font_path.write_bytes(font_response.content)
                     except Exception as e:
                         print(f"  ⚠ Failed to download {weight_key}: {e}")
                         continue

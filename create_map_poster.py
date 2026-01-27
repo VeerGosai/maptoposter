@@ -22,7 +22,7 @@ from geopandas import GeoDataFrame
 import pickle
 from shapely.geometry import Point
 from lat_lon_parser import parse
-from .font_management import load_fonts
+from font_management import load_fonts
 
 
 class CacheError(Exception):
