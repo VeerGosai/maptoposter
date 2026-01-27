@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 City Map Poster Generator
 
@@ -577,7 +578,7 @@ def create_poster(
                 water_polys = ox.projection.project_gdf(water_polys)
             except Exception:
                 water_polys = water_polys.to_crs(g_proj.graph['crs'])
-            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=1)
+            water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
@@ -588,7 +589,7 @@ def create_poster(
                 parks_polys = ox.projection.project_gdf(parks_polys)
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
-            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=2)
+            parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
     # Layer 2: Roads with hierarchy coloring
     print("Applying road hierarchy colors...")
     edge_colors = get_edge_colors_by_type(g_proj)
@@ -613,8 +614,9 @@ def create_poster(
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
     create_gradient_fade(ax, THEME['gradient_color'], location='top', zorder=10)
 
-    # Calculate scale factor based on poster width (reference width 12 inches)
-    scale_factor = width / 12.0
+    # Calculate scale factor based on smaller dimension (reference 12 inches)
+    # This ensures text scales properly for both portrait and landscape orientations
+    scale_factor = min(height, width) / 12.0
 
     # Base font sizes (at 12 inches width)
     BASE_MAIN = 60
@@ -624,9 +626,8 @@ def create_poster(
 
     # 4. Typography - use custom fonts if provided, otherwise use default FONTS
     active_fonts = fonts or FONTS
-    # 4. Typography - use custom fonts if provided, otherwise use default FONTS
-    active_fonts = fonts or FONTS
     if active_fonts:
+        # font_main is calculated dynamically later based on length
         font_sub = FontProperties(
             fname=active_fonts["light"], size=BASE_SUB * scale_factor
         )
@@ -637,6 +638,7 @@ def create_poster(
             fname=active_fonts["light"], size=BASE_ATTR * scale_factor
         )
     else:
+        # Fallback to system fonts
         font_sub = FontProperties(
             family="monospace", weight="normal", size=BASE_SUB * scale_factor
         )

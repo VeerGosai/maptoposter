@@ -23,18 +23,37 @@ Generate beautiful, minimalist map posters for any city in the world.
 
 ## Installation
 
+### With uv (Recommended)
+
+Make sure [uv](https://docs.astral.sh/uv/) is installed. Running the script by prepending `uv run` automatically creates and manages a virtual environment.
+
 ```bash
+# First run will automatically install dependencies
+uv run ./create_map_poster.py --city "Paris" --country "France"
+
+# Or sync dependencies explicitly first (using locked versions)
+uv sync --locked
+uv run ./create_map_poster.py --city "Paris" --country "France"
+```
+
+### With pip + venv
+
+```bash
+python -m venv .venv
+source .venv/bin/activate  # On Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
 ## Usage
 
 ### Generate Poster
+
+If you're using `uv`:
 ```bash
-python create_map_poster.py --city "Paris" --country "France"
+uv run ./create_map_poster.py --city <city> --country <country> [options]
 ```
 
-### Full Syntax
+Otherwise (pip + venv):
 ```bash
 python create_map_poster.py --city <city> --country <country> [options]
 ```
@@ -50,9 +69,9 @@ python create_map_poster.py --city <city> --country <country> [options]
 
 | Option | Short | Description | Default |
 |--------|-------|-------------|---------|
-| **OPTIONAL:** `--latitude` | `-lat` | Override latitude center point (must also supply longitude) | |
-| **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (must also supply latitude) | |
-| **OPTIONAL:** `--country-label` | | Override display country (country display on poster) | |
+| **OPTIONAL:** `--latitude` | `-lat` | Override latitude center point (use with --longitude) | |
+| **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (use with --latitude) | |
+| **OPTIONAL:** `--country-label` | | Override country text displayed on poster | |
 | **OPTIONAL:** `--theme` | `-t` | Theme name | terracotta |
 | **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 |
 | **OPTIONAL:** `--list-themes` | | List all available themes | |
