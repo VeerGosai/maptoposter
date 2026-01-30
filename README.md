@@ -269,9 +269,18 @@ map_poster/
 └── README.md
 ```
 
+
 ## Hacker's Guide
 
 Quick reference for contributors who want to extend or modify the script.
+
+### Contributors Guide
+
+- Bug fixes are welcomed
+- Don't submit user interface (web/desktop)
+- Don't Dockerize for now
+- If you vibe code any fix please test it and see before and after version of poster
+- Before embarking on a big feature please ask in Discussions/Issue if it will be merged
 
 ### Architecture Overview
 
