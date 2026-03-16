@@ -70,6 +70,8 @@ DISTANCE_PRESETS = {
     "Wide Area (25 km)": 25000, "Regional (30 km)": 30000,
     "Large Metro (40 km)": 40000, "Greater City (50 km)": 50000,
     "Conurbation (60 km)": 60000, "Mega Region (70 km)": 70000,
+    "Super Region (80 km)": 80000, "Giant Region (90 km)": 90000,
+    "Max Region (100 km)": 100000,
 }
 
 ZOOM_LABELS = {
@@ -78,6 +80,7 @@ ZOOM_LABELS = {
     18000: "Metro overview", 25000: "Wide-area", 30000: "Regional",
     40000: "Large metro", 50000: "Greater city",
     60000: "Conurbation", 70000: "Mega region",
+    80000: "Super region", 90000: "Giant region", 100000: "Max region",
 }
 
 DPI_OPTIONS = [150, 200, 300, 400, 600]
@@ -920,7 +923,7 @@ class MapPosterGUI:
         tk.Label(r, text="Distance (m)", bg=C_PANEL, fg=C_TEXT_DIM,
                  font=(FONT_FAMILY, 11), width=14,
                  anchor="w").pack(side=tk.LEFT)
-        FlatScale(r, from_=1000, to=70000, variable=self.var_distance,
+        FlatScale(r, from_=1000, to=100000, variable=self.var_distance,
                   command=self._on_distance_change,
                   fmt="{:.0f} m").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
