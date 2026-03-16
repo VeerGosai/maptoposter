@@ -648,9 +648,12 @@ def create_poster(
 
     # 2. Setup Plot
     print("Rendering map...")
-    fig, ax = plt.subplots(figsize=(width, height), facecolor=THEME["bg"])
+    fig = plt.figure(figsize=(width, height), facecolor=THEME["bg"])
+    # add_axes([left, bottom, width, height]) in figure-fraction coords.
+    # [0,0,1,1] forces the axes to fill the ENTIRE canvas so tick labels
+    # are rendered outside the figure boundary and never appear in output.
+    ax = fig.add_axes([0, 0, 1, 1])
     ax.set_facecolor(THEME["bg"])
-    ax.set_position((0.0, 0.0, 1.0, 1.0))
 
     # Project graph to a metric CRS so distances and aspect are linear (meters)
     g_proj = ox.project_graph(g)
@@ -831,15 +834,22 @@ def create_poster(
     # 5. Save
     print(f"Saving to {output_file}...")
 
-    # Hide all axis elements (spines, ticks, labels) — must be last, after
-    # all ax.imshow / ax.plot calls which would otherwise re-enable the axes.
+    # Explicitly kill every axis element — ax.axis("off") alone can be
+    # overridden by geopandas/imshow calls, so we nuke each component.
     ax.axis("off")
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.xaxis.set_visible(False)
+    ax.yaxis.set_visible(False)
+    for spine in ax.spines.values():
+        spine.set_visible(False)
+    fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
 
     fmt = output_format.lower()
     save_kwargs = dict(
         facecolor=THEME["bg"],
-        bbox_inches="tight",
-        pad_inches=0.05,
+        bbox_inches=None,
+        pad_inches=0,
     )
 
     # DPI matters mainly for raster formats
