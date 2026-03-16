@@ -1,0 +1,15 @@
+{
+  "name": "Dark Purple",
+  "description": "Pure black canvas with violet roads — galactic midnight atmosphere",
+  "bg": "#000000",
+  "text": "#D080FF",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#E0A0FF",
+  "road_primary": "#C070FF",
+  "road_secondary": "#A050E0",
+  "road_tertiary": "#8038C0",
+  "road_residential": "#5020A0",
+  "road_default": "#8038C0"
+}

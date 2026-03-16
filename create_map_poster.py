@@ -160,23 +160,30 @@ def generate_output_filename(city, theme_name, output_format):
 
 def get_available_themes():
     """
-    Scans the themes directory and returns a list of available theme names.
+    Scans the themes directory (and one level of subdirectories) and returns
+    a list of available theme names.  Subdirectory themes are returned as
+    "subdir/name" (e.g. "dark/dark_yellow", "light/light_blue").
     """
     if not os.path.exists(THEMES_DIR):
         os.makedirs(THEMES_DIR)
         return []
 
     themes = []
-    for file in sorted(os.listdir(THEMES_DIR)):
-        if file.endswith(".json"):
-            theme_name = file[:-5]  # Remove .json extension
-            themes.append(theme_name)
+    for entry in sorted(os.listdir(THEMES_DIR)):
+        entry_path = os.path.join(THEMES_DIR, entry)
+        if os.path.isfile(entry_path) and entry.endswith(".json"):
+            themes.append(entry[:-5])
+        elif os.path.isdir(entry_path):
+            for fname in sorted(os.listdir(entry_path)):
+                if fname.endswith(".json"):
+                    themes.append(f"{entry}/{fname[:-5]}")
     return themes
 
 
 def load_theme(theme_name="terracotta"):
     """
     Load theme from JSON file in themes directory.
+    Supports subdirectory paths such as "dark/dark_yellow".
     """
     theme_file = os.path.join(THEMES_DIR, f"{theme_name}.json")
 

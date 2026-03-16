@@ -1,0 +1,15 @@
+{
+  "name": "Dark White",
+  "description": "Pure black canvas with pure white roads — stark monochrome contrast",
+  "bg": "#000000",
+  "text": "#FFFFFF",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#FFFFFF",
+  "road_primary": "#E8E8E8",
+  "road_secondary": "#C8C8C8",
+  "road_tertiary": "#A0A0A0",
+  "road_residential": "#686868",
+  "road_default": "#A0A0A0"
+}

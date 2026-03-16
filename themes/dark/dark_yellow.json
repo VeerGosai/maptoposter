@@ -1,0 +1,15 @@
+{
+  "name": "Dark Yellow",
+  "description": "Pure black canvas with electric yellow roads — bold wallpaper style",
+  "bg": "#000000",
+  "text": "#FFD700",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#FFE040",
+  "road_primary": "#FFD700",
+  "road_secondary": "#E0B800",
+  "road_tertiary": "#B88A00",
+  "road_residential": "#785800",
+  "road_default": "#B88A00"
+}

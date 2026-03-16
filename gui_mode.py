@@ -99,14 +99,23 @@ def _load_all_themes():
     themes = {}
     if not os.path.isdir(THEMES_DIR):
         return themes
-    for fname in sorted(os.listdir(THEMES_DIR)):
-        if fname.endswith(".json"):
-            path = os.path.join(THEMES_DIR, fname)
+    for entry in sorted(os.listdir(THEMES_DIR)):
+        entry_path = os.path.join(THEMES_DIR, entry)
+        if os.path.isfile(entry_path) and entry.endswith(".json"):
             try:
-                with open(path, "r", encoding=FILE_ENCODING) as fh:
-                    themes[fname[:-5]] = json.load(fh)
+                with open(entry_path, "r", encoding=FILE_ENCODING) as fh:
+                    themes[entry[:-5]] = json.load(fh)
             except (OSError, json.JSONDecodeError):
                 pass
+        elif os.path.isdir(entry_path):
+            for fname in sorted(os.listdir(entry_path)):
+                if fname.endswith(".json"):
+                    path = os.path.join(entry_path, fname)
+                    try:
+                        with open(path, "r", encoding=FILE_ENCODING) as fh:
+                            themes[f"{entry}/{fname[:-5]}"] = json.load(fh)
+                    except (OSError, json.JSONDecodeError):
+                        pass
     return themes
 
 
@@ -648,11 +657,14 @@ class MapPosterGUI:
         self.var_output_dir = tk.StringVar(value=os.path.abspath(POSTERS_DIR))
         self.var_custom_filename = tk.StringVar()
         self.var_all_themes = tk.BooleanVar(value=False)
+        self.var_dark_themes = tk.BooleanVar(value=False)
+        self.var_light_themes = tk.BooleanVar(value=False)
         self.var_show_water = tk.BooleanVar(value=True)
         self.var_show_parks = tk.BooleanVar(value=True)
         self.var_show_coastline = tk.BooleanVar(value=True)
         self.var_show_gradient = tk.BooleanVar(value=True)
         self.var_show_attribution = tk.BooleanVar(value=True)
+        self.var_show_typography = tk.BooleanVar(value=True)
         self.var_road_width_mult = tk.DoubleVar(value=1.0)
         self.var_orientation = tk.StringVar(value="Portrait")
         self.var_zoom_label = tk.StringVar(value=_zoom_label(18000))
@@ -974,7 +986,14 @@ class MapPosterGUI:
             command=self._draw_theme_preview, width=24))
 
         FlatCheck(body, text="Generate ALL themes",
-                  variable=self.var_all_themes).pack(anchor="w", pady=4)
+                  variable=self.var_all_themes).pack(anchor="w", pady=(4, 1))
+
+        row_bulk = tk.Frame(body, bg=C_PANEL)
+        row_bulk.pack(anchor="w", fill=tk.X, pady=(0, 4))
+        FlatCheck(row_bulk, text="Generate 10 Dark",
+                  variable=self.var_dark_themes).pack(side=tk.LEFT, padx=(0, 12))
+        FlatCheck(row_bulk, text="Generate 10 Light",
+                  variable=self.var_light_themes).pack(side=tk.LEFT)
 
         self.lbl_theme_desc = tk.Label(
             body, text="", bg=C_PANEL, fg=C_TEXT_MUT,
@@ -1129,8 +1148,10 @@ class MapPosterGUI:
                   variable=self.var_show_coastline).pack(anchor="w", pady=2)
         FlatCheck(body, text="Gradient fade",
                   variable=self.var_show_gradient).pack(anchor="w", pady=2)
-        FlatCheck(body, text="Attribution text",
+        FlatCheck(body, text="Attribution text  (© OpenStreetMap)",
                   variable=self.var_show_attribution).pack(anchor="w", pady=2)
+        FlatCheck(body, text="City / country / coordinates text",
+                  variable=self.var_show_typography).pack(anchor="w", pady=2)
 
         r = tk.Frame(body, bg=C_PANEL)
         r.pack(fill=tk.X, pady=4)
@@ -1579,6 +1600,7 @@ class MapPosterGUI:
             show_coastline = self.var_show_coastline.get()
             show_gradient = self.var_show_gradient.get()
             show_attribution = self.var_show_attribution.get()
+            show_typography = self.var_show_typography.get()
             road_mult = self.var_road_width_mult.get()
             bg_override = self.var_bg_override.get().strip() or None
             text_override = self.var_text_override.get().strip() or None
@@ -1586,8 +1608,16 @@ class MapPosterGUI:
             output_dir = self.var_output_dir.get().strip()
             custom_filename = self.var_custom_filename.get().strip()
 
-            themes_list = (list(self.all_themes.keys())
-                           if self.var_all_themes.get() else [theme_name])
+            if self.var_all_themes.get():
+                themes_list = list(self.all_themes.keys())
+            elif self.var_dark_themes.get():
+                themes_list = [k for k in self.all_themes.keys()
+                               if k.startswith("dark/")]
+            elif self.var_light_themes.get():
+                themes_list = [k for k in self.all_themes.keys()
+                               if k.startswith("light/")]
+            else:
+                themes_list = [theme_name]
 
             self._set_progress(5, "Resolving coordinates...")
             if lat and lon:
@@ -1796,47 +1826,49 @@ class MapPosterGUI:
                     font_attr = FontProperties(
                         family="monospace", size=8)
 
-                dc = display_city or city
-                dco = display_country or country_label or country
-                spaced = ("  ".join(list(dc.upper()))
-                          if cmp.is_latin_script(dc) else dc)
+                if show_typography:
+                    dc = display_city or city
+                    dco = display_country or country_label or country
+                    spaced = ("  ".join(list(dc.upper()))
+                              if cmp.is_latin_script(dc) else dc)
 
-                base_adj = 60 * scale_factor
-                adj_size = (
-                    max(base_adj * (10 / len(dc)),
-                        10 * scale_factor)
-                    if len(dc) > 10 else base_adj)
-                if active_fonts:
-                    font_main = FontProperties(
-                        fname=active_fonts["bold"], size=adj_size)
-                else:
-                    font_main = FontProperties(
-                        family="monospace", weight="bold",
-                        size=adj_size)
+                    base_adj = 60 * scale_factor
+                    adj_size = (
+                        max(base_adj * (10 / len(dc)),
+                            10 * scale_factor)
+                        if len(dc) > 10 else base_adj)
+                    if active_fonts:
+                        font_main = FontProperties(
+                            fname=active_fonts["bold"], size=adj_size)
+                    else:
+                        font_main = FontProperties(
+                            family="monospace", weight="bold",
+                            size=adj_size)
 
-                ax.text(
-                    0.5, 0.14, spaced, transform=ax.transAxes,
-                    color=cmp.THEME["text"], ha="center",
-                    fontproperties=font_main, zorder=11)
-                ax.text(
-                    0.5, 0.10, dco.upper(), transform=ax.transAxes,
-                    color=cmp.THEME["text"], ha="center",
-                    fontproperties=font_sub, zorder=11)
-                lat_v, lon_v = coords
-                cs = (f"{abs(lat_v):.4f} "
-                      f"{'N' if lat_v >= 0 else 'S'} / "
-                      f"{abs(lon_v):.4f} "
-                      f"{'E' if lon_v >= 0 else 'W'}")
-                ax.text(
-                    0.5, 0.07, cs, transform=ax.transAxes,
-                    color=cmp.THEME["text"], alpha=0.7,
-                    ha="center", fontproperties=font_coords_fp,
-                    zorder=11)
-                ax.plot(
-                    [0.4, 0.6], [0.125, 0.125],
-                    transform=ax.transAxes,
-                    color=cmp.THEME["text"],
-                    linewidth=1 * scale_factor, zorder=11)
+                    ax.text(
+                        0.5, 0.14, spaced, transform=ax.transAxes,
+                        color=cmp.THEME["text"], ha="center",
+                        fontproperties=font_main, zorder=11)
+                    ax.text(
+                        0.5, 0.10, dco.upper(), transform=ax.transAxes,
+                        color=cmp.THEME["text"], ha="center",
+                        fontproperties=font_sub, zorder=11)
+                    lat_v, lon_v = coords
+                    cs = (f"{abs(lat_v):.4f} "
+                          f"{'N' if lat_v >= 0 else 'S'} / "
+                          f"{abs(lon_v):.4f} "
+                          f"{'E' if lon_v >= 0 else 'W'}")
+                    ax.text(
+                        0.5, 0.07, cs, transform=ax.transAxes,
+                        color=cmp.THEME["text"], alpha=0.7,
+                        ha="center", fontproperties=font_coords_fp,
+                        zorder=11)
+                    ax.plot(
+                        [0.4, 0.6], [0.125, 0.125],
+                        transform=ax.transAxes,
+                        color=cmp.THEME["text"],
+                        linewidth=1 * scale_factor, zorder=11)
+
                 if show_attribution:
                     ax.text(
                         0.98, 0.02,
@@ -1864,6 +1896,7 @@ class MapPosterGUI:
                     pad_inches=0)
                 if fmt == "png":
                     save_kw["dpi"] = dpi
+                os.makedirs(os.path.dirname(out_file), exist_ok=True)
                 plt.savefig(out_file, format=fmt, **save_kw)
                 plt.close(fig)
 
@@ -1885,7 +1918,7 @@ class MapPosterGUI:
             self._log(
                 f"\nError: {exc}\n{traceback.format_exc()}")
             self.root.after(
-                0, lambda: messagebox.showerror("Error", str(exc)))
+                0, lambda e=exc: messagebox.showerror("Error", str(e)))
         finally:
             self.is_generating = False
             self._start_time = None
@@ -2097,11 +2130,14 @@ class MapPosterGUI:
             ("output_dir", self.var_output_dir),
             ("custom_filename", self.var_custom_filename),
             ("all_themes", self.var_all_themes),
+            ("dark_themes", self.var_dark_themes),
+            ("light_themes", self.var_light_themes),
             ("show_water", self.var_show_water),
             ("show_parks", self.var_show_parks),
             ("show_coastline", self.var_show_coastline),
             ("show_gradient", self.var_show_gradient),
             ("show_attribution", self.var_show_attribution),
+            ("show_typography", self.var_show_typography),
             ("road_width_mult", self.var_road_width_mult),
             ("orientation", self.var_orientation),
             ("bg_override", self.var_bg_override),
@@ -2125,8 +2161,8 @@ class MapPosterGUI:
         for k in ["width", "height", "road_width_mult", "border_size"]:
             if k in s:
                 getattr(self, f"var_{k}").set(float(s[k]))
-        for k in ["all_themes", "show_water", "show_parks",
-                   "show_coastline", "show_gradient", "show_attribution"]:
+        for k in ["all_themes", "dark_themes", "light_themes", "show_water", "show_parks",
+                   "show_coastline", "show_gradient", "show_attribution", "show_typography"]:
             if k in s:
                 getattr(self, f"var_{k}").set(bool(s[k]))
         self._draw_theme_preview()

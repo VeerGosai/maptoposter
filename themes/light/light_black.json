@@ -1,0 +1,15 @@
+{
+  "name": "Light Black",
+  "description": "Pure white canvas with jet black roads — ultimate clean contrast",
+  "bg": "#FFFFFF",
+  "text": "#000000",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#000000",
+  "road_primary": "#1A1A1A",
+  "road_secondary": "#333333",
+  "road_tertiary": "#505050",
+  "road_residential": "#707070",
+  "road_default": "#505050"
+}

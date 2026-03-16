@@ -1,0 +1,15 @@
+{
+  "name": "Light Purple",
+  "description": "Pure white canvas with deep purple roads — regal clean wallpaper",
+  "bg": "#FFFFFF",
+  "text": "#5500AA",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#8800FF",
+  "road_primary": "#7700DD",
+  "road_secondary": "#6600BB",
+  "road_tertiary": "#550099",
+  "road_residential": "#440077",
+  "road_default": "#550099"
+}

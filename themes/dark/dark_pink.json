@@ -1,0 +1,15 @@
+{
+  "name": "Dark Pink",
+  "description": "Pure black canvas with hot pink roads — vibrant night aesthetic",
+  "bg": "#000000",
+  "text": "#FF69B4",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#FF80C0",
+  "road_primary": "#FF4FA0",
+  "road_secondary": "#E03480",
+  "road_tertiary": "#B01C60",
+  "road_residential": "#780840",
+  "road_default": "#B01C60"
+}

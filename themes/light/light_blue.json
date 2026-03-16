@@ -1,0 +1,15 @@
+{
+  "name": "Light Blue",
+  "description": "Pure white canvas with cobalt blue roads — clean nautical look",
+  "bg": "#FFFFFF",
+  "text": "#003A9E",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#0066FF",
+  "road_primary": "#0052D4",
+  "road_secondary": "#003CA8",
+  "road_tertiary": "#002E80",
+  "road_residential": "#001E58",
+  "road_default": "#002E80"
+}

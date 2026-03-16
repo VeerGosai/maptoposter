@@ -1,0 +1,15 @@
+{
+  "name": "Dark Blue",
+  "description": "Pure black canvas with electric blue roads — deep-space map feel",
+  "bg": "#000000",
+  "text": "#4DA6FF",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#66BBFF",
+  "road_primary": "#3399FF",
+  "road_secondary": "#1A7FE0",
+  "road_tertiary": "#0060C0",
+  "road_residential": "#0040A0",
+  "road_default": "#0060C0"
+}

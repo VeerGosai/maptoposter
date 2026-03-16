@@ -1,0 +1,15 @@
+{
+  "name": "Dark Gold",
+  "description": "Pure black canvas with molten gold roads — luxury atlas on black",
+  "bg": "#000000",
+  "text": "#FFB800",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#FFD040",
+  "road_primary": "#FFB800",
+  "road_secondary": "#E09800",
+  "road_tertiary": "#B87800",
+  "road_residential": "#784800",
+  "road_default": "#B87800"
+}

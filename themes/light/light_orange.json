@@ -1,0 +1,15 @@
+{
+  "name": "Light Orange",
+  "description": "Pure white canvas with burnt orange roads — warm sunrise poster",
+  "bg": "#FFFFFF",
+  "text": "#B84000",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FF6600",
+  "road_primary": "#E05500",
+  "road_secondary": "#C04400",
+  "road_tertiary": "#A03300",
+  "road_residential": "#7A2200",
+  "road_default": "#A03300"
+}

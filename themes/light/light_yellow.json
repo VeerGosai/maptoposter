@@ -1,0 +1,15 @@
+{
+  "name": "Light Yellow",
+  "description": "Pure white canvas with golden yellow roads — sunny minimal poster",
+  "bg": "#FFFFFF",
+  "text": "#8B6000",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FFD700",
+  "road_primary": "#FFBC00",
+  "road_secondary": "#E09800",
+  "road_tertiary": "#C07800",
+  "road_residential": "#A06000",
+  "road_default": "#C07800"
+}

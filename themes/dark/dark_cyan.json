@@ -1,0 +1,15 @@
+{
+  "name": "Dark Cyan",
+  "description": "Pure black canvas with arctic cyan roads — ice-cold futuristic style",
+  "bg": "#000000",
+  "text": "#00E5FF",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#40F0FF",
+  "road_primary": "#00D8F0",
+  "road_secondary": "#00B0C8",
+  "road_tertiary": "#008899",
+  "road_residential": "#005566",
+  "road_default": "#008899"
+}
