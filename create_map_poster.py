@@ -686,7 +686,6 @@ def create_poster(
     print("Applying road hierarchy colors...")
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
     plot_roads_layered(g_proj, ax, compensated_dist)
-    ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 

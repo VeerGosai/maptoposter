@@ -659,7 +659,7 @@ class MapPosterGUI:
         self.var_est_size = tk.StringVar(value="")
         self.var_bg_override = tk.StringVar()
         self.var_text_override = tk.StringVar()
-        self.var_border_size = tk.DoubleVar(value=0.05)
+        self.var_border_size = tk.DoubleVar(value=0.0)
         self.var_preset_city = tk.StringVar()
         self.var_distance_preset = tk.StringVar()
         self.progress_var = tk.DoubleVar(value=0)
@@ -1760,7 +1760,7 @@ class MapPosterGUI:
                 cmp.plot_roads_layered(
                     g_proj, ax, compensated_dist,
                     road_width_mult=road_mult)
-                ax.set_aspect("equal", adjustable="box")
+                ax.set_aspect("auto")
                 ax.set_xlim(crop_xlim)
                 ax.set_ylim(crop_ylim)
 
@@ -1848,10 +1848,20 @@ class MapPosterGUI:
 
                 self._set_progress(
                     base + 70, f"Saving {fmt.upper()}...")
+                # Turn off all axis decorations so tick marks and labels
+                # never appear in the exported image.
+                ax.axis("off")
+                ax.set_xticks([])
+                ax.set_yticks([])
+                ax.xaxis.set_visible(False)
+                ax.yaxis.set_visible(False)
+                for spine in ax.spines.values():
+                    spine.set_visible(False)
+                fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
                 save_kw = dict(
                     facecolor=cmp.THEME["bg"],
-                    bbox_inches="tight",
-                    pad_inches=border_size)
+                    bbox_inches=None,
+                    pad_inches=0)
                 if fmt == "png":
                     save_kw["dpi"] = dpi
                 plt.savefig(out_file, format=fmt, **save_kw)
