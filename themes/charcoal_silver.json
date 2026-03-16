@@ -1,0 +1,15 @@
+{
+  "name": "Charcoal Silver",
+  "description": "Anthracite background with metallic silver roads - sleek industrial",
+  "bg": "#1A1A1A",
+  "text": "#C8C8C8",
+  "gradient_color": "#1A1A1A",
+  "water": "#0D0D0D",
+  "parks": "#202020",
+  "road_motorway": "#E0E0E0",
+  "road_primary": "#C0C0C0",
+  "road_secondary": "#A0A0A0",
+  "road_tertiary": "#808080",
+  "road_residential": "#606060",
+  "road_default": "#808080"
+}

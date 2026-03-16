@@ -1,0 +1,15 @@
+{
+  "name": "Toxic Green",
+  "description": "Terminal-style neon green on pure black - hacker map aesthetic",
+  "bg": "#000800",
+  "text": "#00FF41",
+  "gradient_color": "#000800",
+  "water": "#000400",
+  "parks": "#001200",
+  "road_motorway": "#00FF41",
+  "road_primary": "#00E038",
+  "road_secondary": "#00C030",
+  "road_tertiary": "#009025",
+  "road_residential": "#006018",
+  "road_default": "#009025"
+}

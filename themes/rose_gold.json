@@ -1,0 +1,15 @@
+{
+  "name": "Rose Gold",
+  "description": "Deep mauve background with rose-gold metallic roads - warm and elegant",
+  "bg": "#1E0F18",
+  "text": "#E8A090",
+  "gradient_color": "#1E0F18",
+  "water": "#110810",
+  "parks": "#28142A",
+  "road_motorway": "#E8A090",
+  "road_primary": "#D4847A",
+  "road_secondary": "#B86868",
+  "road_tertiary": "#9A5055",
+  "road_residential": "#7A3540",
+  "road_default": "#9A5055"
+}

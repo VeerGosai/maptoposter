@@ -1,0 +1,15 @@
+{
+  "name": "Neon Yellow",
+  "description": "Electric yellow roads on jet black - high voltage energy",
+  "bg": "#0A0900",
+  "text": "#FFE600",
+  "gradient_color": "#0A0900",
+  "water": "#050400",
+  "parks": "#0D0C00",
+  "road_motorway": "#FFE600",
+  "road_primary": "#E6CF00",
+  "road_secondary": "#C9B300",
+  "road_tertiary": "#A89500",
+  "road_residential": "#7A6D00",
+  "road_default": "#A89500"
+}

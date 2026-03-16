@@ -134,13 +134,13 @@ def download_google_font(font_family: str, weights: list = None) -> Optional[dic
         return None
 
 
-def load_fonts(font_family: Optional[str] = None) -> Optional[dict]:
+def load_fonts(font_family: Optional[str] = "Poppins") -> Optional[dict]:
     """
     Load fonts from local directory or download from Google Fonts.
     Returns dict with font paths for different weights.
 
     :param font_family: Google Fonts family name (e.g., 'Noto Sans JP', 'Open Sans').
-                       If None, uses local Roboto fonts.
+                       Defaults to 'Poppins'. Pass None to use local Roboto fonts.
     :return: Dict with 'bold', 'regular', 'light' keys mapping to font file paths,
              or None if all loading methods fail
     """

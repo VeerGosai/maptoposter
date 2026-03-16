@@ -5,7 +5,9 @@ Custom dark web-style interface with Poppins font.
 Launch with:  python create_map_poster.py GUI
 """
 
+import io
 import json
+import math
 import os
 import platform
 import random
@@ -71,7 +73,8 @@ DISTANCE_PRESETS = {
     "Large Metro (40 km)": 40000, "Greater City (50 km)": 50000,
     "Conurbation (60 km)": 60000, "Mega Region (70 km)": 70000,
     "Super Region (80 km)": 80000, "Giant Region (90 km)": 90000,
-    "Max Region (100 km)": 100000,
+    "Max Region (100 km)": 100000, "Country Scale (120 km)": 120000,
+    "Wide Country (150 km)": 150000, "Macro Region (200 km)": 200000,
 }
 
 ZOOM_LABELS = {
@@ -81,6 +84,7 @@ ZOOM_LABELS = {
     40000: "Large metro", 50000: "Greater city",
     60000: "Conurbation", 70000: "Mega region",
     80000: "Super region", 90000: "Giant region", 100000: "Max region",
+    120000: "Country scale", 150000: "Wide country", 200000: "Macro region",
 }
 
 DPI_OPTIONS = [150, 200, 300, 400, 600]
@@ -149,6 +153,86 @@ def _format_bytes(n):
         return f"{n/1024:.1f} KB"
     else:
         return f"{n/(1024*1024):.2f} MB"
+
+
+def _deg2tile_float(lat, lon, zoom):
+    """Return exact (float) tile coordinates for lat/lon at zoom."""
+    lat_r = math.radians(lat)
+    n = 2 ** zoom
+    x_f = (lon + 180.0) / 360.0 * n
+    y_f = (1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n
+    return x_f, y_f
+
+
+def _deg2tile(lat, lon, zoom):
+    x_f, y_f = _deg2tile_float(lat, lon, zoom)
+    return int(x_f), int(y_f)
+
+
+def _fetch_tile_preview(lat, lon, dist_m, canvas_w, canvas_h):
+    """Fetch OSM tiles covering the area bbox and return (PIL Image, zoom, cx, cy).
+    cx/cy are the canvas pixel coordinates of the exact lat/lon point.
+    Returns (None, 0, 0, 0) on failure."""
+    try:
+        import requests
+        from PIL import Image
+    except ImportError:
+        return None, 0, 0, 0
+
+    # Pick zoom so the full diameter fits in canvas_w pixels.
+    lat_r = math.radians(lat)
+    zoom = 12
+    for z in range(17, 3, -1):
+        mpp = 156543.03 * math.cos(lat_r) / (2 ** z)  # meters per pixel
+        if dist_m * 2.4 / mpp <= canvas_w:
+            zoom = z
+            break
+
+    # Exact float tile position of the coordinate
+    x_f, y_f = _deg2tile_float(lat, lon, zoom)
+    tx_c, ty_c = int(x_f), int(y_f)
+
+    half_tx = math.ceil(canvas_w / 2 / 256) + 1
+    half_ty = math.ceil(canvas_h / 2 / 256) + 1
+
+    n = 2 ** zoom
+    x0 = max(0, tx_c - half_tx)
+    x1 = min(n - 1, tx_c + half_tx)
+    y0 = max(0, ty_c - half_ty)
+    y1 = min(n - 1, ty_c + half_ty)
+
+    cols = x1 - x0 + 1
+    rows = y1 - y0 + 1
+    mosaic = Image.new("RGB", (cols * 256, rows * 256), (30, 30, 40))
+
+    headers = {"User-Agent": "maptoposter/1.0 (area preview)"}
+    for tx in range(x0, x1 + 1):
+        for ty in range(y0, y1 + 1):
+            url = f"https://tile.openstreetmap.org/{zoom}/{tx}/{ty}.png"
+            try:
+                resp = requests.get(url, headers=headers, timeout=8)
+                if resp.status_code == 200:
+                    tile = Image.open(io.BytesIO(resp.content)).convert("RGB")
+                    mosaic.paste(tile, ((tx - x0) * 256, (ty - y0) * 256))
+            except Exception:
+                pass
+
+    # Exact pixel in mosaic for the target coordinate
+    px = (x_f - x0) * 256
+    py = (y_f - y0) * 256
+
+    # Crop canvas_w × canvas_h centred on the exact coordinate pixel
+    left = px - canvas_w / 2
+    top  = py - canvas_h / 2
+    left = max(0.0, min(left, cols * 256 - canvas_w))
+    top  = max(0.0, min(top,  rows * 256 - canvas_h))
+    left, top = int(left), int(top)
+    cropped = mosaic.crop((left, top, left + canvas_w, top + canvas_h))
+
+    # The coordinate lands at this pixel inside the cropped canvas
+    cx = int(px - left)
+    cy = int(py - top)
+    return cropped, zoom, cx, cy
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +628,8 @@ class MapPosterGUI:
         self.is_generating = False
         self._dot_idx = 0
         self._start_time = None
+        self._cancel_event = threading.Event()
+        self._area_preview_photo = None  # prevent GC
 
         self.var_city = tk.StringVar()
         self.var_country = tk.StringVar()
@@ -558,12 +644,13 @@ class MapPosterGUI:
         self.var_display_city = tk.StringVar()
         self.var_display_country = tk.StringVar()
         self.var_country_label = tk.StringVar()
-        self.var_font_family = tk.StringVar()
+        self.var_font_family = tk.StringVar(value="Poppins")
         self.var_output_dir = tk.StringVar(value=os.path.abspath(POSTERS_DIR))
         self.var_custom_filename = tk.StringVar()
         self.var_all_themes = tk.BooleanVar(value=False)
         self.var_show_water = tk.BooleanVar(value=True)
         self.var_show_parks = tk.BooleanVar(value=True)
+        self.var_show_coastline = tk.BooleanVar(value=True)
         self.var_show_gradient = tk.BooleanVar(value=True)
         self.var_show_attribution = tk.BooleanVar(value=True)
         self.var_road_width_mult = tk.DoubleVar(value=1.0)
@@ -691,7 +778,12 @@ class MapPosterGUI:
         self.btn_generate = FlatButton(
             btn_row, text="GENERATE POSTER", command=self._generate,
             bg=C_ACCENT, hover_bg=C_ACCENT_H, font_size=12, padx=20, pady=10)
-        self.btn_generate.pack(fill=tk.X, expand=True)
+        self.btn_generate.pack(side=tk.LEFT, fill=tk.X, expand=True)
+
+        self.btn_cancel = FlatButton(
+            btn_row, text="✕ CANCEL", command=self._cancel,
+            bg=C_RED, hover_bg="#c0392b", font_size=11, padx=14, pady=10)
+        # hidden until generation starts
 
         sub_row = tk.Frame(gen_bar, bg=C_PANEL, padx=12)
         sub_row.pack(fill=tk.X, pady=(0, 8))
@@ -819,7 +911,7 @@ class MapPosterGUI:
 
         self.sec_typo = AccordionSection(
             f, "Typography",
-            preview_func=lambda: self.var_font_family.get() or "Roboto",
+            preview_func=lambda: self.var_font_family.get() or "Poppins",
             open_by_default=False)
         self.sec_typo.pack(fill=tk.X)
         self._build_typography(self.sec_typo.body)
@@ -828,6 +920,7 @@ class MapPosterGUI:
             f, "Advanced",
             preview_func=lambda: (
                 f"water={'on' if self.var_show_water.get() else 'off'} "
+                f"coast={'on' if self.var_show_coastline.get() else 'off'} "
                 f"road x{self.var_road_width_mult.get():.1f}"),
             open_by_default=False)
         self.sec_adv.pack(fill=tk.X)
@@ -923,7 +1016,7 @@ class MapPosterGUI:
         tk.Label(r, text="Distance (m)", bg=C_PANEL, fg=C_TEXT_DIM,
                  font=(FONT_FAMILY, 11), width=14,
                  anchor="w").pack(side=tk.LEFT)
-        FlatScale(r, from_=1000, to=100000, variable=self.var_distance,
+        FlatScale(r, from_=1000, to=200000, variable=self.var_distance,
                   command=self._on_distance_change,
                   fmt="{:.0f} m").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -1032,6 +1125,8 @@ class MapPosterGUI:
                   variable=self.var_show_water).pack(anchor="w", pady=2)
         FlatCheck(body, text="Parks / green spaces",
                   variable=self.var_show_parks).pack(anchor="w", pady=2)
+        FlatCheck(body, text="Coastline",
+                  variable=self.var_show_coastline).pack(anchor="w", pady=2)
         FlatCheck(body, text="Gradient fade",
                   variable=self.var_show_gradient).pack(anchor="w", pady=2)
         FlatCheck(body, text="Attribution text",
@@ -1152,6 +1247,11 @@ class MapPosterGUI:
             font=(FONT_FAMILY, 9), anchor="w")
         self._elapsed_lbl.pack(anchor="w", pady=(6, 0))
 
+        self._eta_lbl = tk.Label(
+            inner, text="", bg=C_SECTION, fg=C_TEXT_MUT,
+            font=(FONT_FAMILY, 9), anchor="w")
+        self._eta_lbl.pack(anchor="w", pady=(2, 0))
+
         hist_sec = tk.Frame(parent, bg=C_PANEL)
         hist_sec.pack(fill=tk.X, padx=8, pady=(4, 8))
         tk.Label(hist_sec, text="HISTORY", bg=C_PANEL, fg=C_TEXT_DIM,
@@ -1167,6 +1267,33 @@ class MapPosterGUI:
             self._hist_container, text="No posters generated yet",
             bg=C_PANEL, fg=C_TEXT_MUT, font=(FONT_FAMILY, 10), pady=8)
         self._hist_empty.pack()
+
+        # ---- AREA PREVIEW -----------------------------------------------
+        ap_sec = tk.Frame(parent, bg=C_PANEL)
+        ap_sec.pack(fill=tk.X, padx=8, pady=(4, 12))
+
+        ap_hdr = tk.Frame(ap_sec, bg=C_PANEL)
+        ap_hdr.pack(fill=tk.X)
+        tk.Label(ap_hdr, text="AREA PREVIEW", bg=C_PANEL, fg=C_TEXT_DIM,
+                 font=(FONT_FAMILY, 10, "bold"), pady=6,
+                 padx=8).pack(side=tk.LEFT)
+        self._preview_area_btn = FlatButton(
+            ap_hdr, text="Preview Area", command=self._preview_area,
+            bg=C_SECTION, hover_bg=C_HOVER, font_size=9, padx=10, pady=4)
+        self._preview_area_btn.pack(side=tk.RIGHT, padx=8, pady=4)
+
+        tk.Frame(ap_sec, bg=C_BORDER, height=1).pack(fill=tk.X)
+
+        self._area_canvas = tk.Canvas(
+            ap_sec, height=220, bg="#181822",
+            highlightthickness=0, bd=0)
+        self._area_canvas.pack(fill=tk.X, padx=0, pady=0)
+
+        self._area_status_lbl = tk.Label(
+            ap_sec, text="Enter city/country or coordinates, then click Preview Area",
+            bg=C_PANEL, fg=C_TEXT_MUT, font=(FONT_FAMILY, 9),
+            wraplength=360, justify="center", pady=4)
+        self._area_status_lbl.pack()
 
     # ==================================================================
     # Theme preview
@@ -1284,16 +1411,19 @@ class MapPosterGUI:
     # Live stats tick (runs every 500ms)
     # ==================================================================
     def _tick_stats(self):
-        NET.tick(0.5)
-        dl, ul, dl_rate, ul_rate = NET.snapshot()
-
-        self._dl_rate_lbl.config(text=f"{_format_bytes(dl_rate)}/s")
-        self._ul_rate_lbl.config(text=f"{_format_bytes(ul_rate)}/s")
-        self._dl_total_lbl.config(text=_format_bytes(dl))
-        self._ul_total_lbl.config(text=_format_bytes(ul))
+        if self.is_generating:
+            NET.tick(0.5)
+            dl, ul, dl_rate, ul_rate = NET.snapshot()
+            self._dl_rate_lbl.config(text=f"{_format_bytes(dl_rate)}/s")
+            self._ul_rate_lbl.config(text=f"{_format_bytes(ul_rate)}/s")
+            self._dl_total_lbl.config(text=_format_bytes(dl))
+            self._ul_total_lbl.config(text=_format_bytes(ul))
+        else:
+            self._dl_rate_lbl.config(text="\u2014")
+            self._ul_rate_lbl.config(text="\u2014")
 
         if self.is_generating:
-            patterns = [".    ", "..   ", "...  ", " .. ", "  .  "]
+            patterns = [".", "..", "...", "..", "."]
             self._dot_idx = (self._dot_idx + 1) % len(patterns)
             self._dots_label.config(
                 text=patterns[self._dot_idx], fg=C_ACCENT)
@@ -1301,8 +1431,20 @@ class MapPosterGUI:
                 elapsed = time.time() - self._start_time
                 m, s = divmod(int(elapsed), 60)
                 self._elapsed_lbl.config(text=f"Elapsed: {m:02d}:{s:02d}")
+                # ETA: linear model from two calibration points:
+                #   70 km  -> 12 min,  200 km -> 30 min
+                # slope = (30-12)/(200000-70000) min/m
+                _slope = 18.0 / 130_000
+                dist_m = getattr(self, '_eta_dist_m', self.var_distance.get())
+                est_total = (_slope * dist_m + 12.0 - _slope * 70_000) * 60
+                remaining = max(0.0, est_total - elapsed)
+                rm, rs = divmod(int(remaining), 60)
+                pct = min(100, int(elapsed / max(est_total, 1) * 100))
+                self._eta_lbl.config(
+                    text=f"ETA: {rm:02d}:{rs:02d} remaining  ({pct}%)")
         else:
             self._dots_label.config(text="\u2014", fg=C_TEXT_MUT)
+            self._eta_lbl.config(text="")
 
         self._draw_progress_bar()
         self.root.after(500, self._tick_stats)
@@ -1398,8 +1540,11 @@ class MapPosterGUI:
 
         self.is_generating = True
         self._start_time = time.time()
+        self._eta_dist_m = self.var_distance.get()
+        self._cancel_event.clear()
         NET.reset()
         self.btn_generate.set_disabled(True)
+        self.btn_cancel.pack(side=tk.LEFT, padx=(6, 0))
         self.progress_var.set(0)
         self.progress_text.set("Starting...")
         self._log(f"--- Starting: {city}, {country} ---")
@@ -1428,9 +1573,10 @@ class MapPosterGUI:
             display_city = self.var_display_city.get().strip() or None
             display_country = self.var_display_country.get().strip() or None
             country_label = self.var_country_label.get().strip() or None
-            font_family = self.var_font_family.get().strip() or None
+            font_family = self.var_font_family.get().strip() or "Poppins"
             show_water = self.var_show_water.get()
             show_parks = self.var_show_parks.get()
+            show_coastline = self.var_show_coastline.get()
             show_gradient = self.var_show_gradient.get()
             show_attribution = self.var_show_attribution.get()
             road_mult = self.var_road_width_mult.get()
@@ -1452,6 +1598,10 @@ class MapPosterGUI:
                 coords = cmp.get_coordinates(city, country)
                 self._log(
                     f"Coordinates: {coords[0]:.4f}, {coords[1]:.4f}")
+
+            if self._cancel_event.is_set():
+                self._log("Cancelled.")
+                return
 
             total = len(themes_list)
             for t_idx, t_name in enumerate(themes_list):
@@ -1506,6 +1656,10 @@ class MapPosterGUI:
                     continue
                 self._log("OK: Street network loaded")
 
+                if self._cancel_event.is_set():
+                    self._log("Cancelled.")
+                    return
+
                 self._set_progress(
                     base + 20, "Downloading water features...")
                 water_data = None
@@ -1530,7 +1684,21 @@ class MapPosterGUI:
                         "OK: Parks"
                         if parks_data is not None else "  (no parks)")
 
+                coastline_data = None
+                if show_coastline:
+                    self._set_progress(base + 35, "Downloading coastline...")
+                    coastline_data = cmp.fetch_features(
+                        coords, compensated_dist,
+                        tags={"natural": "coastline"},
+                        name="coastline")
+                    self._log(
+                        "OK: Coastline"
+                        if coastline_data is not None else "  (no coastline)")
+
                 self._set_progress(base + 40, "Rendering poster...")
+                if self._cancel_event.is_set():
+                    self._log("Cancelled.")
+                    return
                 import matplotlib.pyplot as plt
                 import osmnx as ox
 
@@ -1567,18 +1735,31 @@ class MapPosterGUI:
                                 facecolor=cmp.THEME['parks'],
                                 edgecolor='none', zorder=0.8)
 
+                if (coastline_data is not None
+                        and not coastline_data.empty
+                        and show_coastline):
+                    cl = coastline_data[
+                        coastline_data.geometry.type.isin(
+                            ["LineString", "MultiLineString",
+                             "Polygon", "MultiPolygon"])]
+                    if not cl.empty:
+                        try:
+                            cl = ox.projection.project_gdf(cl)
+                        except Exception:
+                            cl = cl.to_crs(g_proj.graph['crs'])
+                        coast_color = cmp.THEME.get(
+                            'water', '#4a90d9')
+                        cl.plot(ax=ax,
+                                edgecolor=coast_color,
+                                facecolor='none',
+                                linewidth=1.2, zorder=1.5)
+
                 self._set_progress(base + 50, "Drawing roads...")
-                edge_colors = cmp.get_edge_colors_by_type(g_proj)
-                edge_widths = [
-                    w * road_mult
-                    for w in cmp.get_edge_widths_by_type(g_proj)]
                 crop_xlim, crop_ylim = cmp.get_crop_limits(
                     g_proj, coords, fig, compensated_dist)
-                ox.plot_graph(
-                    g_proj, ax=ax, bgcolor=cmp.THEME['bg'],
-                    node_size=0, edge_color=edge_colors,
-                    edge_linewidth=edge_widths,
-                    show=False, close=False)
+                cmp.plot_roads_layered(
+                    g_proj, ax, compensated_dist,
+                    road_width_mult=road_mult)
                 ax.set_aspect("equal", adjustable="box")
                 ax.set_xlim(crop_xlim)
                 ax.set_ylim(crop_ylim)
@@ -1698,8 +1879,113 @@ class MapPosterGUI:
         finally:
             self.is_generating = False
             self._start_time = None
-            self.root.after(
-                0, lambda: self.btn_generate.set_disabled(False))
+            self.root.after(0, lambda: self.btn_generate.set_disabled(False))
+            self.root.after(0, self.btn_cancel.pack_forget)
+            self.root.after(0, self._clear_net_display)
+
+    def _cancel(self):
+        if self.is_generating:
+            self._cancel_event.set()
+            self._log("Cancelling — waiting for current step to finish...")
+            self.btn_cancel.set_disabled(True)
+
+    def _clear_net_display(self):
+        self._dl_rate_lbl.config(text="\u2014")
+        self._ul_rate_lbl.config(text="\u2014")
+        self._dl_total_lbl.config(text="\u2014")
+        self._ul_total_lbl.config(text="\u2014")
+        self._elapsed_lbl.config(text="")
+        self._eta_lbl.config(text="")
+
+    def _preview_area(self):
+        """Resolve coordinates then fetch OSM tiles for an area overview."""
+        city = self.var_city.get().strip()
+        country = self.var_country.get().strip()
+        lat_s = self.var_lat.get().strip()
+        lon_s = self.var_lon.get().strip()
+
+        if not (city and country) and not (lat_s and lon_s):
+            messagebox.showerror(
+                "Missing input",
+                "Enter a city + country or manual coordinates first.")
+            return
+
+        self._area_status_lbl.config(text="Fetching coordinates…")
+        self._preview_area_btn.set_disabled(True)
+        self._area_canvas.delete("all")
+
+        def worker():
+            try:
+                if lat_s and lon_s:
+                    from lat_lon_parser import parse as llparse
+                    coords = (llparse(lat_s), llparse(lon_s))
+                else:
+                    import create_map_poster as cmp
+                    coords = cmp.get_coordinates(city, country)
+
+                lat, lon = coords
+                dist = self.var_distance.get()
+
+                self.root.after(0, lambda: self._area_status_lbl.config(
+                    text=f"Loading tiles for {lat:.4f}, {lon:.4f}…"))
+
+                self._area_canvas.update_idletasks()
+                cw = max(self._area_canvas.winfo_width(), 360)
+                ch = max(self._area_canvas.winfo_height(), 220)
+
+                img = _fetch_tile_preview(lat, lon, dist, cw, ch)
+
+                if img is None:
+                    self.root.after(0, lambda: self._area_status_lbl.config(
+                        text="Tile fetch failed — check internet connection."))
+                    return
+                img, used_zoom, pin_x, pin_y = img
+
+                # Draw bbox rectangle and crosshair using exact pin position
+                from PIL import ImageDraw
+                draw = ImageDraw.Draw(img)
+                lat_r = math.radians(lat)
+                mpp = 156543.03 * math.cos(lat_r) / (2 ** used_zoom)
+                half_px = int(dist / mpp)
+                rx0 = max(0, pin_x - half_px)
+                ry0 = max(0, pin_y - half_px)
+                rx1 = min(cw, pin_x + half_px)
+                ry1 = min(ch, pin_y + half_px)
+                draw.rectangle([rx0, ry0, rx1, ry1],
+                                outline="#6c5ce7", width=2)
+                # Crosshair exactly on the coordinate
+                arm = 12
+                draw.line([(pin_x - arm, pin_y), (pin_x + arm, pin_y)],
+                          fill="#e74c3c", width=2)
+                draw.line([(pin_x, pin_y - arm), (pin_x, pin_y + arm)],
+                          fill="#e74c3c", width=2)
+                draw.ellipse([pin_x - 4, pin_y - 4, pin_x + 4, pin_y + 4],
+                              outline="#e74c3c", width=2)
+
+                from PIL import ImageTk
+                photo = ImageTk.PhotoImage(img)
+
+                def _show():
+                    self._area_preview_photo = photo
+                    self._area_canvas.config(
+                        width=cw, height=ch)
+                    self._area_canvas.create_image(
+                        0, 0, anchor="nw", image=photo)
+                    dist_km = dist / 1000
+                    self._area_status_lbl.config(
+                        text=(f"{lat:.4f} {'N' if lat>=0 else 'S'}, "
+                              f"{lon:.4f} {'E' if lon>=0 else 'W'} "
+                              f"— radius {dist_km:.0f} km"))
+                    self._preview_area_btn.set_disabled(False)
+
+                self.root.after(0, _show)
+
+            except Exception as exc:
+                self.root.after(0, lambda: self._area_status_lbl.config(
+                    text=f"Error: {exc}"))
+                self.root.after(0, lambda: self._preview_area_btn.set_disabled(False))
+
+        threading.Thread(target=worker, daemon=True).start()
 
     def _set_progress(self, value, text):
         v = min(value, 100)
@@ -1803,6 +2089,7 @@ class MapPosterGUI:
             ("all_themes", self.var_all_themes),
             ("show_water", self.var_show_water),
             ("show_parks", self.var_show_parks),
+            ("show_coastline", self.var_show_coastline),
             ("show_gradient", self.var_show_gradient),
             ("show_attribution", self.var_show_attribution),
             ("road_width_mult", self.var_road_width_mult),
@@ -1829,7 +2116,7 @@ class MapPosterGUI:
             if k in s:
                 getattr(self, f"var_{k}").set(float(s[k]))
         for k in ["all_themes", "show_water", "show_parks",
-                   "show_gradient", "show_attribution"]:
+                   "show_coastline", "show_gradient", "show_attribution"]:
             if k in s:
                 getattr(self, f"var_{k}").set(bool(s[k]))
         self._draw_theme_preview()
@@ -1952,6 +2239,7 @@ class MapPosterGUI:
 
         self.is_generating = True
         self._start_time = time.time()
+        self._eta_dist_m = self.var_distance.get()
         NET.reset()
         self.btn_generate.set_disabled(True)
         threading.Thread(target=worker, daemon=True).start()

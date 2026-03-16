@@ -1,0 +1,15 @@
+{
+  "name": "Vintage Parchment",
+  "description": "Aged parchment background with sepia roads - antique cartography",
+  "bg": "#F5E6C8",
+  "text": "#3D2B1A",
+  "gradient_color": "#F5E6C8",
+  "water": "#C8D8E8",
+  "parks": "#D4E8C0",
+  "road_motorway": "#8B1A1A",
+  "road_primary": "#A0522D",
+  "road_secondary": "#8B6914",
+  "road_tertiary": "#A0825A",
+  "road_residential": "#C0A080",
+  "road_default": "#A0825A"
+}
