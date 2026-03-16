@@ -1,0 +1,15 @@
+{
+  "name": "Arctic",
+  "description": "Ice-white background with cool navy roads - clean polar aesthetic",
+  "bg": "#EEF5FF",
+  "text": "#0A2540",
+  "gradient_color": "#EEF5FF",
+  "water": "#B8D4F0",
+  "parks": "#E0EEF8",
+  "road_motorway": "#1B4F8A",
+  "road_primary": "#2566B0",
+  "road_secondary": "#4A86C8",
+  "road_tertiary": "#7AAAD8",
+  "road_residential": "#A8C8E8",
+  "road_default": "#7AAAD8"
+}

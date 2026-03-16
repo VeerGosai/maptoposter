@@ -1,0 +1,15 @@
+{
+  "name": "Neon Pink",
+  "description": "Hot pink roads on pure black - bold nightclub aesthetic",
+  "bg": "#0D0009",
+  "text": "#FF0090",
+  "gradient_color": "#0D0009",
+  "water": "#080005",
+  "parks": "#120010",
+  "road_motorway": "#FF0090",
+  "road_primary": "#E0007E",
+  "road_secondary": "#C0006C",
+  "road_tertiary": "#960054",
+  "road_residential": "#6A003B",
+  "road_default": "#960054"
+}

@@ -47,7 +47,7 @@ POSTERS_DIR = "posters"
 
 FILE_ENCODING = "utf-8"
 
-FONTS = load_fonts()
+FONTS = load_fonts("Poppins")
 
 
 def _cache_path(key: str) -> str:
@@ -316,6 +316,79 @@ def get_edge_widths_by_type(g):
     return edge_widths
 
 
+# Road tiers ordered from lowest to highest priority (drawn bottom → top).
+# Each entry: (set_of_highway_values, theme_color_key, base_width, is_minor)
+_ROAD_TIERS = [
+    (
+        {"residential", "living_street", "unclassified", "service",
+         "road", "track", "path", "footway", "cycleway",
+         "bridleway", "steps", "pedestrian"},
+        "road_residential", 0.2, True,
+    ),
+    ({"tertiary", "tertiary_link"},        "road_tertiary",   0.4, True),
+    ({"secondary", "secondary_link"},      "road_secondary",  0.7, False),
+    ({"trunk", "trunk_link",
+      "primary", "primary_link"},          "road_primary",    1.0, False),
+    ({"motorway", "motorway_link"},         "road_motorway",   1.3, False),
+]
+
+
+def _minor_road_scale(dist):
+    """Width multiplier for minor roads at large map extents.
+    Fades from 1.0 at <=100 km to 0.15 at 200 km."""
+    if dist <= 100_000:
+        return 1.0
+    return max(0.15, 1.0 - (dist - 100_000) / 117_647)
+
+
+def plot_roads_layered(g_proj, ax, dist, road_width_mult=1.0):
+    """Draw roads in hierarchical passes so major roads always render on top.
+    Minor roads are progressively thinned at distances > 100 km."""
+    def _hw(val):
+        if isinstance(val, list):
+            return val[0] if val else "unclassified"
+        return val or "unclassified"
+
+    try:
+        _, edges_gdf = ox.graph_to_gdfs(g_proj)
+    except Exception:
+        # Fallback: single-pass legacy rendering
+        edge_colors = get_edge_colors_by_type(g_proj)
+        edge_widths = [w * road_width_mult
+                       for w in get_edge_widths_by_type(g_proj)]
+        ox.plot_graph(g_proj, ax=ax, bgcolor=THEME['bg'], node_size=0,
+                      edge_color=edge_colors, edge_linewidth=edge_widths,
+                      show=False, close=False)
+        return
+
+    minor_scale = _minor_road_scale(dist)
+    all_typed = set()
+
+    for zorder, (hw_set, color_key, base_w, is_minor) in enumerate(
+            _ROAD_TIERS, start=2):
+        mask = edges_gdf["highway"].apply(lambda v: _hw(v) in hw_set)
+        subset = edges_gdf[mask]
+        all_typed |= hw_set
+        if subset.empty:
+            continue
+        scale = minor_scale if is_minor else 1.0
+        width = base_w * scale * road_width_mult
+        if width < 0.05:
+            continue
+        color = THEME.get(color_key, THEME.get("road_default", "#666666"))
+        subset.plot(ax=ax, color=color, linewidth=width, zorder=zorder)
+
+    # Catch any highway types not covered by the tier table
+    mask_other = edges_gdf["highway"].apply(lambda v: _hw(v) not in all_typed)
+    other = edges_gdf[mask_other]
+    if not other.empty:
+        width = 0.4 * minor_scale * road_width_mult
+        if width >= 0.05:
+            other.plot(ax=ax,
+                       color=THEME.get("road_default", "#666666"),
+                       linewidth=width, zorder=2)
+
+
 def get_coordinates(city, country):
     """
     Fetches coordinates for a given city and country using geopy.
@@ -428,7 +501,21 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
         return cast(MultiDiGraph, cached)
 
     try:
-        g = ox.graph_from_point(point, dist=dist, dist_type='bbox', network_type='all', truncate_by_edge=True)
+        # At very large scales (>100 km) limit to major roads only to keep
+        # data size manageable and the poster readable.
+        if dist > 100_000:
+            custom_filter = (
+                '["highway"~"motorway|motorway_link|trunk|trunk_link'
+                '|primary|primary_link|secondary|secondary_link'
+                '|tertiary|tertiary_link"]'
+            )
+            g = ox.graph_from_point(
+                point, dist=dist, dist_type='bbox',
+                custom_filter=custom_filter, truncate_by_edge=True)
+        else:
+            g = ox.graph_from_point(
+                point, dist=dist, dist_type='bbox',
+                network_type='all', truncate_by_edge=True)
         # Rate limit between requests
         time.sleep(0.5)
         try:
@@ -591,25 +678,15 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
-    # Layer 2: Roads with hierarchy coloring
+    # Layer 2: Roads — drawn tier by tier, lowest class first so major
+    # roads always render on top. Minor roads are thinned at large scales.
     print("Applying road hierarchy colors...")
-    edge_colors = get_edge_colors_by_type(g_proj)
-    edge_widths = get_edge_widths_by_type(g_proj)
-
-    # Determine cropping limits to maintain the poster aspect ratio
     crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
-    # Plot the projected graph and then apply the cropped limits
-    ox.plot_graph(
-        g_proj, ax=ax, bgcolor=THEME['bg'],
-        node_size=0,
-        edge_color=edge_colors,
-        edge_linewidth=edge_widths,
-        show=False,
-        close=False,
-    )
+    plot_roads_layered(g_proj, ax, compensated_dist)
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
+    ax.axis("off")
 
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)

@@ -1,0 +1,15 @@
+{
+  "name": "Crimson White",
+  "description": "Bold crimson roads on clean white - striking minimalist design",
+  "bg": "#FFFFFF",
+  "text": "#C00000",
+  "gradient_color": "#FFFFFF",
+  "water": "#EAF2FF",
+  "parks": "#F5FFF5",
+  "road_motorway": "#C00000",
+  "road_primary": "#D80000",
+  "road_secondary": "#B00000",
+  "road_tertiary": "#8B0000",
+  "road_residential": "#CC4444",
+  "road_default": "#8B0000"
+}

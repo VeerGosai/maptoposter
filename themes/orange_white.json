@@ -1,0 +1,15 @@
+{
+  "name": "Orange White",
+  "description": "Vivid orange roads on bright white - fresh and energetic",
+  "bg": "#FFFFFF",
+  "text": "#E85D04",
+  "gradient_color": "#FFFFFF",
+  "water": "#EAF4FF",
+  "parks": "#F5FFF0",
+  "road_motorway": "#E85D04",
+  "road_primary": "#F77F00",
+  "road_secondary": "#F4A261",
+  "road_tertiary": "#E07B3A",
+  "road_residential": "#F0C499",
+  "road_default": "#E07B3A"
+}

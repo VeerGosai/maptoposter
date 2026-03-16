@@ -1,0 +1,15 @@
+{
+  "name": "Deep Violet",
+  "description": "Near-black purple background with radiant lavender roads",
+  "bg": "#0E0820",
+  "text": "#C8A0FF",
+  "gradient_color": "#0E0820",
+  "water": "#07040F",
+  "parks": "#160E30",
+  "road_motorway": "#C060FF",
+  "road_primary": "#A844DD",
+  "road_secondary": "#8A30BB",
+  "road_tertiary": "#6C1E99",
+  "road_residential": "#4A1278",
+  "road_default": "#6C1E99"
+}
