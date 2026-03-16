@@ -686,7 +686,6 @@ def create_poster(
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
-    ax.axis("off")
 
     # Layer 3: Gradients (Top and Bottom)
     create_gradient_fade(ax, THEME['gradient_color'], location='bottom', zorder=10)
@@ -831,6 +830,10 @@ def create_poster(
 
     # 5. Save
     print(f"Saving to {output_file}...")
+
+    # Hide all axis elements (spines, ticks, labels) — must be last, after
+    # all ax.imshow / ax.plot calls which would otherwise re-enable the axes.
+    ax.axis("off")
 
     fmt = output_format.lower()
     save_kwargs = dict(
