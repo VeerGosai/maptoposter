@@ -1,0 +1,15 @@
+{
+  "name": "Light Red",
+  "description": "Pure white canvas with bold red roads — high-contrast minimal",
+  "bg": "#FFFFFF",
+  "text": "#990000",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FF0000",
+  "road_primary": "#CC0000",
+  "road_secondary": "#AA0000",
+  "road_tertiary": "#880000",
+  "road_residential": "#660000",
+  "road_default": "#880000"
+}

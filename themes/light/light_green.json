@@ -1,0 +1,15 @@
+{
+  "name": "Light Green",
+  "description": "Pure white canvas with forest green roads — crisp nature minimal",
+  "bg": "#FFFFFF",
+  "text": "#004800",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#00AA00",
+  "road_primary": "#008800",
+  "road_secondary": "#006600",
+  "road_tertiary": "#004C00",
+  "road_residential": "#003200",
+  "road_default": "#004C00"
+}

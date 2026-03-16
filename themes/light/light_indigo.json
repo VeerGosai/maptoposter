@@ -1,0 +1,15 @@
+{
+  "name": "Light Indigo",
+  "description": "Pure white canvas with deep indigo roads — blueprint elegance",
+  "bg": "#FFFFFF",
+  "text": "#2B0066",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#3B0099",
+  "road_primary": "#4400CC",
+  "road_secondary": "#3300A0",
+  "road_tertiary": "#260080",
+  "road_residential": "#1A0060",
+  "road_default": "#260080"
+}

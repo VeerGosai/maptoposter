@@ -1,0 +1,15 @@
+{
+  "name": "Dark Green",
+  "description": "Pure black canvas with neon green roads — matrix terminal aesthetic",
+  "bg": "#000000",
+  "text": "#00E676",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#00FF88",
+  "road_primary": "#00D066",
+  "road_secondary": "#00A04E",
+  "road_tertiary": "#007838",
+  "road_residential": "#005028",
+  "road_default": "#007838"
+}

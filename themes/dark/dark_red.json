@@ -1,0 +1,15 @@
+{
+  "name": "Dark Red",
+  "description": "Pure black canvas with crimson roads — cinematic noir intensity",
+  "bg": "#000000",
+  "text": "#FF4444",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "parks": "#080808",
+  "road_motorway": "#FF6666",
+  "road_primary": "#FF2020",
+  "road_secondary": "#E00000",
+  "road_tertiary": "#B80000",
+  "road_residential": "#800000",
+  "road_default": "#B80000"
+}

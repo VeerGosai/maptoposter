@@ -1,0 +1,15 @@
+{
+  "name": "Light Pink",
+  "description": "Pure white canvas with deep pink roads — soft glam wallpaper",
+  "bg": "#FFFFFF",
+  "text": "#B0005A",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FF1493",
+  "road_primary": "#E0007A",
+  "road_secondary": "#C00060",
+  "road_tertiary": "#9A0049",
+  "road_residential": "#780036",
+  "road_default": "#9A0049"
+}
