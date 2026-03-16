@@ -956,6 +956,12 @@ Examples:
         help="Output format for the poster (default: png)",
     )
 
+    # --- GUI mode: launch if first argument is "GUI" ---
+    if len(sys.argv) >= 2 and sys.argv[1].upper() == "GUI":
+        from gui_mode import launch_gui
+        launch_gui()
+        sys.exit(0)
+
     args = parser.parse_args()
 
     # If no arguments provided, show examples
