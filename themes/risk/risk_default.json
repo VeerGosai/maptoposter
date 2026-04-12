@@ -1,0 +1,15 @@
+{
+  "name": "Risk Default (Light)",
+  "description": "Monochrome light theme — clean white backgrounds with black text and accents",
+  "bg": "#f9fafb",
+  "text": "#000000",
+  "gradient_color": "#f9fafb",
+  "water": "#ffffff",
+  "parks": "#f3f4f6",
+  "road_motorway": "#000000",
+  "road_primary": "#1a1a1a",
+  "road_secondary": "#333333",
+  "road_tertiary": "#555555",
+  "road_residential": "#888888",
+  "road_default": "#555555"
+}

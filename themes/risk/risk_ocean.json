@@ -1,0 +1,15 @@
+{
+  "name": "Risk Ocean",
+  "description": "Deep blue palette evoking an underwater/nautical feel",
+  "bg": "#071423",
+  "text": "#c8ddff",
+  "gradient_color": "#071423",
+  "water": "#0d1f38",
+  "parks": "#162d4f",
+  "road_motorway": "#3b82f6",
+  "road_primary": "#2d6ed4",
+  "road_secondary": "#2058b0",
+  "road_tertiary": "#18448a",
+  "road_residential": "#1a3360",
+  "road_default": "#2058b0"
+}

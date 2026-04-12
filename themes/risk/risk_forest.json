@@ -1,0 +1,15 @@
+{
+  "name": "Risk Forest",
+  "description": "Rich green palette with a nature/terminal aesthetic",
+  "bg": "#081410",
+  "text": "#c8f0d5",
+  "gradient_color": "#081410",
+  "water": "#0e2019",
+  "parks": "#183d28",
+  "road_motorway": "#22c55e",
+  "road_primary": "#1da84f",
+  "road_secondary": "#188a40",
+  "road_tertiary": "#136c32",
+  "road_residential": "#0f4f24",
+  "road_default": "#188a40"
+}

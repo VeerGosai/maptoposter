@@ -659,6 +659,7 @@ class MapPosterGUI:
         self.var_all_themes = tk.BooleanVar(value=False)
         self.var_dark_themes = tk.BooleanVar(value=False)
         self.var_light_themes = tk.BooleanVar(value=False)
+        self.var_risk_themes = tk.BooleanVar(value=False)
         self.var_show_water = tk.BooleanVar(value=True)
         self.var_show_parks = tk.BooleanVar(value=True)
         self.var_show_coastline = tk.BooleanVar(value=True)
@@ -993,7 +994,9 @@ class MapPosterGUI:
         FlatCheck(row_bulk, text="Generate 10 Dark",
                   variable=self.var_dark_themes).pack(side=tk.LEFT, padx=(0, 12))
         FlatCheck(row_bulk, text="Generate 10 Light",
-                  variable=self.var_light_themes).pack(side=tk.LEFT)
+                  variable=self.var_light_themes).pack(side=tk.LEFT, padx=(0, 12))
+        FlatCheck(row_bulk, text="Generate Risk",
+                  variable=self.var_risk_themes).pack(side=tk.LEFT)
 
         self.lbl_theme_desc = tk.Label(
             body, text="", bg=C_PANEL, fg=C_TEXT_MUT,
@@ -1616,6 +1619,9 @@ class MapPosterGUI:
             elif self.var_light_themes.get():
                 themes_list = [k for k in self.all_themes.keys()
                                if k.startswith("light/")]
+            elif self.var_risk_themes.get():
+                themes_list = [k for k in self.all_themes.keys()
+                               if k.startswith("risk/")]
             else:
                 themes_list = [theme_name]
 
@@ -2132,6 +2138,7 @@ class MapPosterGUI:
             ("all_themes", self.var_all_themes),
             ("dark_themes", self.var_dark_themes),
             ("light_themes", self.var_light_themes),
+            ("risk_themes", self.var_risk_themes),
             ("show_water", self.var_show_water),
             ("show_parks", self.var_show_parks),
             ("show_coastline", self.var_show_coastline),
@@ -2230,7 +2237,7 @@ class MapPosterGUI:
     def _show_batch_dialog(self):
         dlg = tk.Toplevel(self.root)
         dlg.title("Batch Generate")
-        dlg.geometry("520x440")
+        dlg.geometry("520x500")
         dlg.configure(bg=C_PANEL)
         dlg.transient(self.root)
 
@@ -2238,16 +2245,38 @@ class MapPosterGUI:
             dlg, text="Enter cities (one per line: City, Country)",
             bg=C_PANEL, fg=C_TEXT, font=(FONT_FAMILY, 12),
             padx=12, pady=10).pack(anchor="w")
-        text = tk.Text(
-            dlg, bg=C_INPUT_BG, fg=C_INPUT_FG,
-            font=(FONT_FAMILY, 11), relief="flat", bd=0,
-            padx=8, pady=6, insertbackground=C_TEXT)
-        text.pack(fill=tk.BOTH, expand=True, padx=12)
-        text.insert(
-            "1.0", "New York, USA\nParis, France\nTokyo, Japan\n")
 
+        # --- Settings summary (inherited from main GUI) ---
+        info_frame = tk.Frame(dlg, bg=C_SECTION, padx=8, pady=6)
+        info_frame.pack(fill=tk.X, padx=12, pady=(0, 6))
+        tk.Label(info_frame, text="Current settings:",
+                 bg=C_SECTION, fg=C_TEXT_DIM,
+                 font=(FONT_FAMILY, 9, "bold")).pack(anchor="w")
+
+        if self.var_all_themes.get():
+            theme_txt = "ALL themes"
+        elif self.var_dark_themes.get():
+            theme_txt = "All Dark themes"
+        elif self.var_light_themes.get():
+            theme_txt = "All Light themes"
+        elif self.var_risk_themes.get():
+            theme_txt = "All Risk themes"
+        else:
+            theme_txt = self.var_theme.get()
+
+        summary = (
+            f"Theme: {theme_txt}  |  "
+            f"Distance: {self.var_distance.get()}m  |  "
+            f"DPI: {self.var_dpi.get()}  |  "
+            f"Format: {self.var_format.get()}"
+        )
+        tk.Label(info_frame, text=summary, bg=C_SECTION, fg=C_TEXT_DIM,
+                 font=(FONT_FAMILY, 9), wraplength=480,
+                 anchor="w", justify="left").pack(anchor="w")
+
+        # --- Button row (pack BEFORE text so it stays visible at bottom) ---
         btn_row = tk.Frame(dlg, bg=C_PANEL, pady=10)
-        btn_row.pack(fill=tk.X, padx=12)
+        btn_row.pack(side=tk.BOTTOM, fill=tk.X, padx=12)
         FlatButton(
             btn_row, text="Generate All",
             command=lambda: self._run_batch(
@@ -2257,6 +2286,15 @@ class MapPosterGUI:
             btn_row, text="Cancel", command=dlg.destroy,
             bg=C_SECTION, hover_bg=C_HOVER,
             fg=C_TEXT_DIM).pack(side=tk.RIGHT, padx=(0, 8))
+
+        # --- City text area (fills remaining space) ---
+        text = tk.Text(
+            dlg, bg=C_INPUT_BG, fg=C_INPUT_FG,
+            font=(FONT_FAMILY, 11), relief="flat", bd=0,
+            padx=8, pady=6, insertbackground=C_TEXT)
+        text.pack(fill=tk.BOTH, expand=True, padx=12, pady=(0, 4))
+        text.insert(
+            "1.0", "New York, USA\nParis, France\nTokyo, Japan\n")
 
     def _run_batch(self, text, dialog):
         dialog.destroy()

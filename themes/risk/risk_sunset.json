@@ -1,0 +1,15 @@
+{
+  "name": "Risk Sunset",
+  "description": "Warm orange/amber tones evoking a sunset atmosphere",
+  "bg": "#180d08",
+  "text": "#f5d8c0",
+  "gradient_color": "#180d08",
+  "water": "#221309",
+  "parks": "#3d2010",
+  "road_motorway": "#f97316",
+  "road_primary": "#d56213",
+  "road_secondary": "#b05010",
+  "road_tertiary": "#8a3e0c",
+  "road_residential": "#633009",
+  "road_default": "#b05010"
+}

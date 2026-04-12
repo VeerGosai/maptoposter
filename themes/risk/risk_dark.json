@@ -1,0 +1,15 @@
+{
+  "name": "Risk Dark",
+  "description": "Inverted monochrome — very dark backgrounds with white text and accents",
+  "bg": "#0d0d0f",
+  "text": "#f0f0f0",
+  "gradient_color": "#0d0d0f",
+  "water": "#161618",
+  "parks": "#2a2a2e",
+  "road_motorway": "#ffffff",
+  "road_primary": "#d0d0d0",
+  "road_secondary": "#a0a0a0",
+  "road_tertiary": "#707070",
+  "road_residential": "#454549",
+  "road_default": "#707070"
+}

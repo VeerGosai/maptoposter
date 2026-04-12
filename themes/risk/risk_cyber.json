@@ -1,0 +1,15 @@
+{
+  "name": "Risk Cyber",
+  "description": "Neon purple/violet palette — cyberpunk digital aesthetic",
+  "bg": "#0a0010",
+  "text": "#ead5ff",
+  "gradient_color": "#0a0010",
+  "water": "#120020",
+  "parks": "#280055",
+  "road_motorway": "#a855f7",
+  "road_primary": "#9048d4",
+  "road_secondary": "#783cb0",
+  "road_tertiary": "#602f8c",
+  "road_residential": "#482268",
+  "road_default": "#783cb0"
+}
