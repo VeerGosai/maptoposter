@@ -1784,7 +1784,8 @@ class MapPosterGUI:
                         except Exception:
                             cl = cl.to_crs(g_proj.graph['crs'])
                         coast_color = cmp.THEME.get(
-                            'water', '#4a90d9')
+                            'coastline', cmp.THEME.get(
+                            'water', '#4a90d9'))
                         cl.plot(ax=ax,
                                 edgecolor=coast_color,
                                 facecolor='none',
