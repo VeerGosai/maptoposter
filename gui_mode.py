@@ -1789,7 +1789,7 @@ class MapPosterGUI:
                         cl.plot(ax=ax,
                                 edgecolor=coast_color,
                                 facecolor='none',
-                                linewidth=1.2, zorder=1.5)
+                                linewidth=2.0, zorder=1.5)
 
                 self._set_progress(base + 50, "Drawing roads...")
                 crop_xlim, crop_ylim = cmp.get_crop_limits(

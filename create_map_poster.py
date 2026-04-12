@@ -651,6 +651,15 @@ def create_poster(
         )
         pbar.update(1)
 
+    # Fetch coastline separately (not counted in progress bar)
+    print("Downloading coastline...")
+    coastline = fetch_features(
+        point,
+        compensated_dist,
+        tags={"natural": "coastline"},
+        name="coastline",
+    )
+
     print("✓ All data retrieved successfully!")
 
     # 2. Setup Plot
@@ -688,6 +697,20 @@ def create_poster(
             except Exception:
                 parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
+
+    # Layer 1.5: Coastline
+    if coastline is not None and not coastline.empty:
+        coast_geoms = coastline[coastline.geometry.type.isin(
+            ["LineString", "MultiLineString", "Polygon", "MultiPolygon"])]
+        if not coast_geoms.empty:
+            try:
+                coast_geoms = ox.projection.project_gdf(coast_geoms)
+            except Exception:
+                coast_geoms = coast_geoms.to_crs(g_proj.graph['crs'])
+            coast_color = THEME.get('coastline', THEME.get('water', '#4a90d9'))
+            coast_geoms.plot(ax=ax, edgecolor=coast_color, facecolor='none',
+                             linewidth=2.0, zorder=1.5)
+
     # Layer 2: Roads — drawn tier by tier, lowest class first so major
     # roads always render on top. Minor roads are thinned at large scales.
     print("Applying road hierarchy colors...")
