@@ -14,6 +14,7 @@ import os
 import pickle
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import cast
@@ -48,6 +49,18 @@ POSTERS_DIR = "posters"
 FILE_ENCODING = "utf-8"
 
 FONTS = load_fonts("Poppins")
+
+# OSMnx tuning: enable on-disk cache, generous timeout, and don't pause between
+# requests (we serialize our own retries with backoff and parallelize misses).
+try:
+    ox.settings.use_cache = True
+    ox.settings.log_console = False
+    ox.settings.requests_timeout = 180
+    # osmnx < 2.0 had `overpass_rate_limit`; 2.x removed it. Be defensive.
+    if hasattr(ox.settings, "overpass_rate_limit"):
+        ox.settings.overpass_rate_limit = False
+except Exception:
+    pass
 
 
 def _cache_path(key: str) -> str:
@@ -486,12 +499,84 @@ def get_crop_limits(g_proj, center_lat_lon, fig, dist):
     )
 
 
+def _graph_cache_key(point, dist) -> str:
+    lat, lon = point
+    return f"graph_{lat}_{lon}_{dist}"
+
+
+def _features_cache_key(point, dist, tags, name) -> str:
+    lat, lon = point
+    tag_str = "_".join(tags.keys())
+    return f"{name}_{lat}_{lon}_{dist}_{tag_str}"
+
+
+def _is_transient_net_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return any(
+        k in msg
+        for k in (
+            "connection refused",
+            "max retries",
+            "timed out",
+            "timeout",
+            "temporary failure",
+            "name or service not known",
+            "remote end closed",
+            "bad gateway",
+            "gateway time-out",
+            "service unavailable",
+            "429",
+            "502",
+            "503",
+            "504",
+        )
+    )
+
+
+def _with_retry(fn, label, attempts=4, base_delay=1.5):
+    """Call fn() with exponential backoff on transient network errors."""
+    for attempt in range(1, attempts + 1):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt == attempts or not _is_transient_net_error(e):
+                print(f"OSMnx error while fetching {label}: {e}")
+                return None
+            delay = base_delay * (2 ** (attempt - 1))
+            print(
+                f"  ⚠ {label}: attempt {attempt}/{attempts} failed "
+                f"({e.__class__.__name__}); retrying in {delay:.1f}s..."
+            )
+            time.sleep(delay)
+    return None
+
+
+def _fetch_graph_api(point, dist) -> MultiDiGraph | None:
+    """Hit Overpass for the street network. No cache lookups here."""
+    # At very large scales (>100 km) limit to major roads only to keep
+    # data size manageable and the poster readable.
+    if dist > 100_000:
+        custom_filter = (
+            '["highway"~"motorway|motorway_link|trunk|trunk_link'
+            '|primary|primary_link|secondary|secondary_link'
+            '|tertiary|tertiary_link"]'
+        )
+        return ox.graph_from_point(
+            point, dist=dist, dist_type='bbox',
+            custom_filter=custom_filter, truncate_by_edge=True)
+    return ox.graph_from_point(
+        point, dist=dist, dist_type='bbox',
+        network_type='all', truncate_by_edge=True)
+
+
+def _fetch_features_api(point, dist, tags) -> GeoDataFrame | None:
+    """Hit Overpass for tagged features. No cache lookups here."""
+    return ox.features_from_point(point, tags=tags, dist=dist)
+
+
 def fetch_graph(point, dist) -> MultiDiGraph | None:
     """
-    Fetch street network graph from OpenStreetMap.
-
-    Uses caching to avoid redundant downloads. Fetches all network types
-    within the specified distance from the center point.
+    Fetch street network graph from OpenStreetMap (cache-first).
 
     Args:
         point: (latitude, longitude) tuple for center point
@@ -500,47 +585,24 @@ def fetch_graph(point, dist) -> MultiDiGraph | None:
     Returns:
         MultiDiGraph of street network, or None if fetch fails
     """
-    lat, lon = point
-    graph = f"graph_{lat}_{lon}_{dist}"
-    cached = cache_get(graph)
+    key = _graph_cache_key(point, dist)
+    cached = cache_get(key)
     if cached is not None:
         print("✓ Using cached street network")
         return cast(MultiDiGraph, cached)
 
-    try:
-        # At very large scales (>100 km) limit to major roads only to keep
-        # data size manageable and the poster readable.
-        if dist > 100_000:
-            custom_filter = (
-                '["highway"~"motorway|motorway_link|trunk|trunk_link'
-                '|primary|primary_link|secondary|secondary_link'
-                '|tertiary|tertiary_link"]'
-            )
-            g = ox.graph_from_point(
-                point, dist=dist, dist_type='bbox',
-                custom_filter=custom_filter, truncate_by_edge=True)
-        else:
-            g = ox.graph_from_point(
-                point, dist=dist, dist_type='bbox',
-                network_type='all', truncate_by_edge=True)
-        # Rate limit between requests
-        time.sleep(0.5)
+    g = _with_retry(lambda: _fetch_graph_api(point, dist), "street network")
+    if g is not None:
         try:
-            cache_set(graph, g)
+            cache_set(key, g)
         except CacheError as e:
             print(e)
-        return g
-    except Exception as e:
-        print(f"OSMnx error while fetching graph: {e}")
-        return None
+    return g
 
 
 def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     """
-    Fetch geographic features (water, parks, etc.) from OpenStreetMap.
-
-    Uses caching to avoid redundant downloads. Fetches features matching
-    the specified OSM tags within distance from center point.
+    Fetch geographic features (water, parks, etc.) from OpenStreetMap (cache-first).
 
     Args:
         point: (latitude, longitude) tuple for center point
@@ -551,26 +613,106 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     Returns:
         GeoDataFrame of features, or None if fetch fails
     """
-    lat, lon = point
-    tag_str = "_".join(tags.keys())
-    features = f"{name}_{lat}_{lon}_{dist}_{tag_str}"
-    cached = cache_get(features)
+    key = _features_cache_key(point, dist, tags, name)
+    cached = cache_get(key)
     if cached is not None:
         print(f"✓ Using cached {name}")
         return cast(GeoDataFrame, cached)
 
-    try:
-        data = ox.features_from_point(point, tags=tags, dist=dist)
-        # Rate limit between requests
-        time.sleep(0.3)
+    data = _with_retry(lambda: _fetch_features_api(point, dist, tags), name)
+    if data is not None:
         try:
-            cache_set(features, data)
+            cache_set(key, data)
         except CacheError as e:
             print(e)
-        return data
-    except Exception as e:
-        print(f"OSMnx error while fetching features: {e}")
-        return None
+    return data
+
+
+def prefetch_map_elements(point, dist):
+    """
+    Resolve all map elements (graph + features) needed for a poster.
+
+    Cache is checked for every element up-front. Only the elements that
+    are missing are fetched from Overpass, and those are fetched in
+    parallel (with per-element retries) so a single slow request can't
+    block the others.
+
+    Returns a dict with keys: 'graph', 'water', 'parks', 'coastline'.
+    Any value may be None if its download failed.
+    """
+    water_tags = {"natural": ["water", "bay", "strait"], "waterway": "riverbank"}
+    parks_tags = {"leisure": "park", "landuse": "grass"}
+    coastline_tags = {"natural": "coastline"}
+
+    plan = [
+        (
+            "graph",
+            "street network",
+            _graph_cache_key(point, dist),
+            lambda: _fetch_graph_api(point, dist),
+        ),
+        (
+            "water",
+            "water",
+            _features_cache_key(point, dist, water_tags, "water"),
+            lambda: _fetch_features_api(point, dist, water_tags),
+        ),
+        (
+            "parks",
+            "parks",
+            _features_cache_key(point, dist, parks_tags, "parks"),
+            lambda: _fetch_features_api(point, dist, parks_tags),
+        ),
+        (
+            "coastline",
+            "coastline",
+            _features_cache_key(point, dist, coastline_tags, "coastline"),
+            lambda: _fetch_features_api(point, dist, coastline_tags),
+        ),
+    ]
+
+    results: dict = {}
+    to_fetch: list = []
+    for slot, label, key, fn in plan:
+        cached = cache_get(key)
+        if cached is not None:
+            print(f"✓ Using cached {label}")
+            results[slot] = cached
+        else:
+            results[slot] = None
+            to_fetch.append((slot, label, key, fn))
+
+    if not to_fetch:
+        print("✓ All map elements served from cache")
+        return results
+
+    print(
+        f"⇣ Downloading {len(to_fetch)} missing element(s) from Overpass in parallel: "
+        + ", ".join(label for _, label, _, _ in to_fetch)
+    )
+
+    # Overpass tolerates a few concurrent requests per IP; 4 is the practical max.
+    max_workers = min(4, len(to_fetch))
+    t0 = time.time()
+    with ThreadPoolExecutor(max_workers=max_workers) as pool:
+        futures = {
+            pool.submit(_with_retry, fn, label): (slot, label, key)
+            for slot, label, key, fn in to_fetch
+        }
+        for fut in as_completed(futures):
+            slot, label, key = futures[fut]
+            data = fut.result()
+            results[slot] = data
+            if data is not None:
+                try:
+                    cache_set(key, data)
+                except CacheError as e:
+                    print(e)
+                print(f"  ✓ {label} downloaded")
+            else:
+                print(f"  ✗ {label} unavailable")
+    print(f"⇣ Overpass batch finished in {time.time() - t0:.1f}s")
+    return results
 
 
 def create_poster(
@@ -616,49 +758,19 @@ def create_poster(
 
     print(f"\nGenerating map for {city}, {country}...")
 
-    # Progress bar for data fetching
-    with tqdm(
-        total=3,
-        desc="Fetching map data",
-        unit="step",
-        bar_format="{l_bar}{bar}| {n_fmt}/{total_fmt}",
-    ) as pbar:
-        # 1. Fetch Street Network
-        pbar.set_description("Downloading street network")
-        compensated_dist = dist * (max(height, width) / min(height, width)) / 4  # To compensate for viewport crop
-        g = fetch_graph(point, compensated_dist)
-        if g is None:
-            raise RuntimeError("Failed to retrieve street network data.")
-        pbar.update(1)
+    # Compensate for viewport crop so we always have enough data to fill the canvas.
+    compensated_dist = dist * (max(height, width) / min(height, width)) / 4
 
-        # 2. Fetch Water Features
-        pbar.set_description("Downloading water features")
-        water = fetch_features(
-            point,
-            compensated_dist,
-            tags={"natural": ["water", "bay", "strait"], "waterway": "riverbank"},
-            name="water",
-        )
-        pbar.update(1)
+    # Resolve every element up-front: cache hits are instant, misses are
+    # downloaded from Overpass in parallel with per-element retries.
+    elements = prefetch_map_elements(point, compensated_dist)
+    g = elements["graph"]
+    water = elements["water"]
+    parks = elements["parks"]
+    coastline = elements["coastline"]
 
-        # 3. Fetch Parks
-        pbar.set_description("Downloading parks/green spaces")
-        parks = fetch_features(
-            point,
-            compensated_dist,
-            tags={"leisure": "park", "landuse": "grass"},
-            name="parks",
-        )
-        pbar.update(1)
-
-    # Fetch coastline separately (not counted in progress bar)
-    print("Downloading coastline...")
-    coastline = fetch_features(
-        point,
-        compensated_dist,
-        tags={"natural": "coastline"},
-        name="coastline",
-    )
+    if g is None:
+        raise RuntimeError("Failed to retrieve street network data.")
 
     print("✓ All data retrieved successfully!")
 

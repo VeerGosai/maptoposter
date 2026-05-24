@@ -35,3 +35,6 @@ htmlcov/
 .pytest_cache/
 
 posters/
+TEMP/
+TEMP
+posters

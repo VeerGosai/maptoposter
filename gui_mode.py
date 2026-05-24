@@ -1547,6 +1547,54 @@ class MapPosterGUI:
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
 
+    def _selected_theme_names(self):
+        if self.var_all_themes.get():
+            names = list(self.all_themes.keys())
+        else:
+            names = []
+            if self.var_dark_themes.get():
+                names.extend(
+                    [k for k in self.all_themes.keys() if k.startswith("dark/")]
+                )
+            if self.var_light_themes.get():
+                names.extend(
+                    [k for k in self.all_themes.keys() if k.startswith("light/")]
+                )
+            if self.var_risk_themes.get():
+                names.extend(
+                    [k for k in self.all_themes.keys() if k.startswith("risk/")]
+                )
+            if not names:
+                names = [self.var_theme.get()]
+
+        deduped = list(dict.fromkeys(names))
+        return deduped or [self.var_theme.get()]
+
+    def _selected_theme_summary(self):
+        names = self._selected_theme_names()
+        total = len(names)
+        if self.var_all_themes.get():
+            return f"ALL themes ({total} total)"
+
+        groups = []
+        if self.var_dark_themes.get():
+            groups.append("Dark")
+        if self.var_light_themes.get():
+            groups.append("Light")
+        if self.var_risk_themes.get():
+            groups.append("Risk")
+
+        if groups:
+            return f"{' + '.join(groups)} themes ({total} total)"
+        return self.var_theme.get()
+
+    def _finish_generation_ui(self):
+        self.is_generating = False
+        self._start_time = None
+        self.root.after(0, lambda: self.btn_generate.set_disabled(False))
+        self.root.after(0, self.btn_cancel.pack_forget)
+        self.root.after(0, self._clear_net_display)
+
     # ==================================================================
     # Generation
     # ==================================================================
@@ -1575,7 +1623,13 @@ class MapPosterGUI:
         threading.Thread(
             target=self._generate_worker, daemon=True).start()
 
-    def _generate_worker(self):
+    def _generate_worker(
+        self,
+        show_completion_alert=True,
+        finalize_ui=True,
+        show_error_alert=True,
+    ):
+        generated_posters = 0
         try:
             _install_net_hooks()
 
@@ -1586,7 +1640,6 @@ class MapPosterGUI:
 
             city = self.var_city.get().strip()
             country = self.var_country.get().strip()
-            theme_name = self.var_theme.get()
             dist = self.var_distance.get()
             width = self.var_width.get()
             height = self.var_height.get()
@@ -1611,19 +1664,7 @@ class MapPosterGUI:
             output_dir = self.var_output_dir.get().strip()
             custom_filename = self.var_custom_filename.get().strip()
 
-            if self.var_all_themes.get():
-                themes_list = list(self.all_themes.keys())
-            elif self.var_dark_themes.get():
-                themes_list = [k for k in self.all_themes.keys()
-                               if k.startswith("dark/")]
-            elif self.var_light_themes.get():
-                themes_list = [k for k in self.all_themes.keys()
-                               if k.startswith("light/")]
-            elif self.var_risk_themes.get():
-                themes_list = [k for k in self.all_themes.keys()
-                               if k.startswith("risk/")]
-            else:
-                themes_list = [theme_name]
+            themes_list = self._selected_theme_names()
 
             self._set_progress(5, "Resolving coordinates...")
             if lat and lon:
@@ -1637,7 +1678,58 @@ class MapPosterGUI:
 
             if self._cancel_event.is_set():
                 self._log("Cancelled.")
-                return
+                return generated_posters
+
+            # Fetch every map element ONCE per city, before the theme loop.
+            # Cache hits are instant; misses are downloaded from Overpass in
+            # parallel with retries. Every theme then re-uses these in-memory
+            # objects, so we don't re-hit the cache (or the network) 10x for
+            # the same city/distance.
+            compensated_dist = (
+                dist * (max(height, width) / min(height, width)) / 4)
+            self._set_progress(8, "Fetching map elements (cache + Overpass)...")
+            elements = cmp.prefetch_map_elements(coords, compensated_dist)
+            g = elements["graph"]
+            water_data = elements["water"] if show_water else None
+            parks_data = elements["parks"] if show_parks else None
+            coastline_data = elements["coastline"] if show_coastline else None
+            if g is None:
+                self._log("FAIL: Failed to fetch street network")
+                return generated_posters
+            self._log("OK: Map elements ready (shared across all themes)")
+
+            # Project the graph once — this is the expensive CPU step and the
+            # result is theme-independent.
+            import osmnx as ox
+            self._set_progress(10, "Projecting graph...")
+            g_proj = ox.project_graph(g)
+
+            # Pre-project feature GDFs once as well; theme only affects color.
+            def _project_gdf(gdf):
+                if gdf is None or gdf.empty:
+                    return gdf
+                try:
+                    return ox.projection.project_gdf(gdf)
+                except Exception:
+                    return gdf.to_crs(g_proj.graph['crs'])
+
+            water_proj = (
+                _project_gdf(
+                    water_data[water_data.geometry.type.isin(
+                        ["Polygon", "MultiPolygon"])])
+                if water_data is not None and not water_data.empty else None)
+            parks_proj = (
+                _project_gdf(
+                    parks_data[parks_data.geometry.type.isin(
+                        ["Polygon", "MultiPolygon"])])
+                if parks_data is not None and not parks_data.empty else None)
+            coastline_proj = (
+                _project_gdf(
+                    coastline_data[coastline_data.geometry.type.isin(
+                        ["LineString", "MultiLineString",
+                         "Polygon", "MultiPolygon"])])
+                if coastline_data is not None
+                and not coastline_data.empty else None)
 
             total = len(themes_list)
             for t_idx, t_name in enumerate(themes_list):
@@ -1682,114 +1774,44 @@ class MapPosterGUI:
                         out_file = cmp.generate_output_filename(
                             city, t_name, fmt)
 
-                self._set_progress(
-                    base + 5, "Downloading street network...")
-                compensated_dist = (
-                    dist * (max(height, width) / min(height, width)) / 4)
-                g = cmp.fetch_graph(coords, compensated_dist)
-                if g is None:
-                    self._log("FAIL: Failed to fetch street network")
-                    continue
-                self._log("OK: Street network loaded")
-
                 if self._cancel_event.is_set():
                     self._log("Cancelled.")
-                    return
-
-                self._set_progress(
-                    base + 20, "Downloading water features...")
-                water_data = None
-                if show_water:
-                    water_data = cmp.fetch_features(
-                        coords, compensated_dist,
-                        tags={"natural": ["water", "bay", "strait"],
-                              "waterway": "riverbank"},
-                        name="water")
-                    self._log(
-                        "OK: Water features"
-                        if water_data is not None else "  (no water)")
-
-                self._set_progress(base + 30, "Downloading parks...")
-                parks_data = None
-                if show_parks:
-                    parks_data = cmp.fetch_features(
-                        coords, compensated_dist,
-                        tags={"leisure": "park", "landuse": "grass"},
-                        name="parks")
-                    self._log(
-                        "OK: Parks"
-                        if parks_data is not None else "  (no parks)")
-
-                coastline_data = None
-                if show_coastline:
-                    self._set_progress(base + 35, "Downloading coastline...")
-                    coastline_data = cmp.fetch_features(
-                        coords, compensated_dist,
-                        tags={"natural": "coastline"},
-                        name="coastline")
-                    self._log(
-                        "OK: Coastline"
-                        if coastline_data is not None else "  (no coastline)")
+                    return generated_posters
 
                 self._set_progress(base + 40, "Rendering poster...")
-                if self._cancel_event.is_set():
-                    self._log("Cancelled.")
-                    return
                 import matplotlib.pyplot as plt
-                import osmnx as ox
 
                 fig, ax = plt.subplots(
                     figsize=(width, height),
                     facecolor=cmp.THEME["bg"])
                 ax.set_facecolor(cmp.THEME["bg"])
                 ax.set_position((0.0, 0.0, 1.0, 1.0))
-                g_proj = ox.project_graph(g)
 
-                if (water_data is not None and not water_data.empty
+                if (water_proj is not None and not water_proj.empty
                         and show_water):
-                    wp = water_data[water_data.geometry.type.isin(
-                        ["Polygon", "MultiPolygon"])]
-                    if not wp.empty:
-                        try:
-                            wp = ox.projection.project_gdf(wp)
-                        except Exception:
-                            wp = wp.to_crs(g_proj.graph['crs'])
-                        wp.plot(ax=ax,
-                                facecolor=cmp.THEME['water'],
-                                edgecolor='none', zorder=0.5)
+                    water_proj.plot(
+                        ax=ax,
+                        facecolor=cmp.THEME['water'],
+                        edgecolor='none', zorder=0.5)
 
-                if (parks_data is not None and not parks_data.empty
+                if (parks_proj is not None and not parks_proj.empty
                         and show_parks):
-                    pp = parks_data[parks_data.geometry.type.isin(
-                        ["Polygon", "MultiPolygon"])]
-                    if not pp.empty:
-                        try:
-                            pp = ox.projection.project_gdf(pp)
-                        except Exception:
-                            pp = pp.to_crs(g_proj.graph['crs'])
-                        pp.plot(ax=ax,
-                                facecolor=cmp.THEME['parks'],
-                                edgecolor='none', zorder=0.8)
+                    parks_proj.plot(
+                        ax=ax,
+                        facecolor=cmp.THEME['parks'],
+                        edgecolor='none', zorder=0.8)
 
-                if (coastline_data is not None
-                        and not coastline_data.empty
+                if (coastline_proj is not None
+                        and not coastline_proj.empty
                         and show_coastline):
-                    cl = coastline_data[
-                        coastline_data.geometry.type.isin(
-                            ["LineString", "MultiLineString",
-                             "Polygon", "MultiPolygon"])]
-                    if not cl.empty:
-                        try:
-                            cl = ox.projection.project_gdf(cl)
-                        except Exception:
-                            cl = cl.to_crs(g_proj.graph['crs'])
-                        coast_color = cmp.THEME.get(
-                            'coastline', cmp.THEME.get(
-                            'water', '#4a90d9'))
-                        cl.plot(ax=ax,
-                                edgecolor=coast_color,
-                                facecolor='none',
-                                linewidth=2.0, zorder=1.5)
+                    coast_color = cmp.THEME.get(
+                        'coastline', cmp.THEME.get(
+                        'water', '#4a90d9'))
+                    coastline_proj.plot(
+                        ax=ax,
+                        edgecolor=coast_color,
+                        facecolor='none',
+                        linewidth=2.0, zorder=1.5)
 
                 self._set_progress(base + 50, "Drawing roads...")
                 crop_xlim, crop_ylim = cmp.get_crop_limits(
@@ -1908,6 +1930,7 @@ class MapPosterGUI:
                 plt.close(fig)
 
                 self.last_output_file = out_file
+                generated_posters += 1
                 self._log(f"OK: Saved: {out_file}")
                 self.root.after(
                     0, self._add_history, city, country,
@@ -1915,23 +1938,25 @@ class MapPosterGUI:
 
             self._set_progress(100, "Done!")
             self._log("\nGeneration complete!")
-            self.root.after(
-                0, lambda: messagebox.showinfo(
-                    "Done",
-                    f"Poster(s) generated!\n{self.last_output_file}"))
+            if show_completion_alert:
+                self.root.after(
+                    0, lambda: messagebox.showinfo(
+                        "Done",
+                        f"Poster(s) generated!\n{self.last_output_file}"))
+
+            return generated_posters
 
         except Exception as exc:
             import traceback
             self._log(
                 f"\nError: {exc}\n{traceback.format_exc()}")
-            self.root.after(
-                0, lambda e=exc: messagebox.showerror("Error", str(e)))
+            if show_error_alert:
+                self.root.after(
+                    0, lambda e=exc: messagebox.showerror("Error", str(e)))
+            return generated_posters
         finally:
-            self.is_generating = False
-            self._start_time = None
-            self.root.after(0, lambda: self.btn_generate.set_disabled(False))
-            self.root.after(0, self.btn_cancel.pack_forget)
-            self.root.after(0, self._clear_net_display)
+            if finalize_ui:
+                self._finish_generation_ui()
 
     def _cancel(self):
         if self.is_generating:
@@ -2169,7 +2194,7 @@ class MapPosterGUI:
         for k in ["width", "height", "road_width_mult", "border_size"]:
             if k in s:
                 getattr(self, f"var_{k}").set(float(s[k]))
-        for k in ["all_themes", "dark_themes", "light_themes", "show_water", "show_parks",
+        for k in ["all_themes", "dark_themes", "light_themes", "risk_themes", "show_water", "show_parks",
                    "show_coastline", "show_gradient", "show_attribution", "show_typography"]:
             if k in s:
                 getattr(self, f"var_{k}").set(bool(s[k]))
@@ -2254,16 +2279,7 @@ class MapPosterGUI:
                  bg=C_SECTION, fg=C_TEXT_DIM,
                  font=(FONT_FAMILY, 9, "bold")).pack(anchor="w")
 
-        if self.var_all_themes.get():
-            theme_txt = "ALL themes"
-        elif self.var_dark_themes.get():
-            theme_txt = "All Dark themes"
-        elif self.var_light_themes.get():
-            theme_txt = "All Light themes"
-        elif self.var_risk_themes.get():
-            theme_txt = "All Risk themes"
-        else:
-            theme_txt = self.var_theme.get()
+        theme_txt = self._selected_theme_summary()
 
         summary = (
             f"Theme: {theme_txt}  |  "
@@ -2309,24 +2325,105 @@ class MapPosterGUI:
         if not cities:
             messagebox.showwarning("Batch", "No valid cities.")
             return
+
+        # Snapshot all generation settings at batch start so per-city
+        # iterations are immune to any later UI changes and always use
+        # exactly what the user had selected when they hit "Generate All".
+        snapshot_vars = [
+            "distance", "width", "height", "format", "dpi",
+            "font_family", "road_width_mult", "border_size",
+            "show_water", "show_parks", "show_coastline",
+            "show_gradient", "show_attribution", "show_typography",
+            "bg_override", "text_override",
+            "all_themes", "dark_themes", "light_themes", "risk_themes",
+            "theme", "output_dir",
+        ]
+        batch_snapshot = {
+            name: getattr(self, f"var_{name}").get()
+            for name in snapshot_vars
+        }
+        locked_themes = list(self._selected_theme_names())
+        themes_per_city = len(locked_themes)
+
         self._log(f"Batch: {len(cities)} cities queued")
+        self._log(
+            f"Locked settings -- distance={batch_snapshot['distance']}m  "
+            f"size={batch_snapshot['width']}x{batch_snapshot['height']}in  "
+            f"dpi={batch_snapshot['dpi']}  "
+            f"format={batch_snapshot['format']}  "
+            f"themes={themes_per_city} ({self._selected_theme_summary()})"
+        )
+
+        def restore_snapshot():
+            for name, value in batch_snapshot.items():
+                try:
+                    getattr(self, f"var_{name}").set(value)
+                except Exception:
+                    pass
 
         def worker():
-            for i, (city, country) in enumerate(cities):
-                self.var_city.set(city)
-                self.var_country.set(country)
-                self._set_progress(
-                    i / len(cities) * 100,
-                    f"Batch {i+1}/{len(cities)}: {city}")
-                self._generate_worker()
-            self._set_progress(
-                100, f"Batch done -- {len(cities)} cities")
+            posters_generated = 0
+            cities_processed = 0
+            try:
+                for i, (city, country) in enumerate(cities):
+                    if self._cancel_event.is_set():
+                        break
+
+                    # Re-apply snapshot before every city so anything the
+                    # user might click in the GUI during batch (or stray
+                    # var traces) can't change the batch parameters.
+                    self.root.after(0, restore_snapshot)
+                    restore_snapshot()
+
+                    self.var_city.set(city)
+                    self.var_country.set(country)
+                    self._set_progress(
+                        i / len(cities) * 100,
+                        f"Batch {i+1}/{len(cities)}: {city} "
+                        f"@ {batch_snapshot['distance']}m")
+                    posters_generated += self._generate_worker(
+                        show_completion_alert=False,
+                        finalize_ui=False,
+                        show_error_alert=False,
+                    )
+                    cities_processed += 1
+
+                if self._cancel_event.is_set():
+                    self._set_progress(0, "Batch cancelled")
+                    self._log("Batch cancelled.")
+                    self.root.after(
+                        0,
+                        lambda done=cities_processed, total=len(cities): messagebox.showwarning(
+                            "Batch Cancelled",
+                            f"Stopped after {done}/{total} cities.",
+                        ),
+                    )
+                else:
+                    self._set_progress(
+                        100,
+                        f"Batch done -- {cities_processed}/{len(cities)} cities",
+                    )
+                    self.root.after(
+                        0,
+                        lambda done=cities_processed, posters=posters_generated, themes=themes_per_city: messagebox.showinfo(
+                            "Batch Done",
+                            "Batch generation complete!\n"
+                            f"Cities processed: {done}\n"
+                            f"Themes per city: {themes}\n"
+                            f"Posters generated: {posters}",
+                        ),
+                    )
+            finally:
+                self._finish_generation_ui()
 
         self.is_generating = True
         self._start_time = time.time()
         self._eta_dist_m = self.var_distance.get()
+        self._cancel_event.clear()
         NET.reset()
         self.btn_generate.set_disabled(True)
+        self.btn_cancel.set_disabled(False)
+        self.btn_cancel.pack(side=tk.LEFT, padx=(6, 0))
         threading.Thread(target=worker, daemon=True).start()
 
 
