@@ -36,10 +36,13 @@ htmlcov/
 .pytest_cache/
 
 posters/
-TEMP/
-TEMP
 posters
 posters.zip
+exports/
+exports
+exports.zip
+TEMP/
+TEMP
 n22222222/
 fonts/
 cache/

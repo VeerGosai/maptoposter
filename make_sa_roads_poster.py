@@ -21,7 +21,7 @@ Text is intentionally omitted -- pure wallpaper.
 Usage
 -----
     python make_sa_roads_poster.py
-    python make_sa_roads_poster.py --out posters/south_africa_dark_yellow.png \
+    python make_sa_roads_poster.py --out exports/south_africa_dark_yellow.png \
                                    --width 5400 --height 7200 --dpi 300
 """
 
@@ -492,7 +492,7 @@ def build_poster(out_path: Path, width_px: int, height_px: int, dpi: int):
 def parse_args():
     p = argparse.ArgumentParser(description=__doc__.splitlines()[1])
     p.add_argument("--out", type=Path,
-                   default=Path("posters/south_africa_dark_yellow.png"),
+                   default=Path("exports/south_africa_dark_yellow.png"),
                    help="Output PNG path")
     p.add_argument("--width", type=int, default=5400,
                    help="Output width in pixels (default 5400)")

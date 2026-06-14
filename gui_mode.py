@@ -23,7 +23,7 @@ from tkinter import colorchooser, filedialog, messagebox
 # Constants / Colours
 # ---------------------------------------------------------------------------
 THEMES_DIR = "themes"
-POSTERS_DIR = "posters"
+POSTERS_DIR = os.environ.get("EXPORTS_DIR", "exports")
 CACHE_DIR = os.environ.get("CACHE_DIR", "cache")
 FILE_ENCODING = "utf-8"
 

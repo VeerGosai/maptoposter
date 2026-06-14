@@ -44,7 +44,7 @@ CACHE_DIR.mkdir(exist_ok=True)
 
 THEMES_DIR = "themes"
 FONTS_DIR = "fonts"
-POSTERS_DIR = "posters"
+POSTERS_DIR = os.environ.get("EXPORTS_DIR", "exports")
 
 FILE_ENCODING = "utf-8"
 
