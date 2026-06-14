@@ -504,6 +504,7 @@ def _stitch_tile_seams(roads, bbox):
     used = np.zeros(len(pts), dtype=bool)
     connectors = []
     conn_hw = []
+    major_classes = {"motorway", "trunk", "primary", "secondary", "tertiary"}
 
     def _bridge(axis, line):
         coord = pts[:, axis]
@@ -511,24 +512,35 @@ def _stitch_tile_seams(roads, bbox):
         side_a = np.where((coord >= line - tol) & (coord < line) & ~used)[0]
         side_b = np.where((coord >= line) & (coord <= line + tol) & ~used)[0]
 
-        def _pick_one_endpoint_per_geom(side_idx):
+        def _pick_distinct_endpoints_per_geom(side_idx):
             if len(side_idx) <= 1:
                 return side_idx
-            # Keep only the endpoint closest to the seam for each geometry.
-            order = np.argsort(np.abs(coord[side_idx] - line))
+            # A long road can cross the same seam multiple times. Keep one
+            # endpoint per distinct crossing location (grouped by geometry and
+            # separated along the seam axis), not just one per geometry.
+            other_axis = 1 - axis
+            min_sep = max(_SEAM_TOL_DEG * 2.0, _SEAM_BRIDGE_DEG * 0.75)
             chosen = []
-            seen_geom = set()
-            for pos in order:
-                idx = int(side_idx[pos])
-                g = int(geom_pos[idx])
-                if g in seen_geom:
-                    continue
-                seen_geom.add(g)
-                chosen.append(idx)
+            by_geom = {}
+            for idx in side_idx:
+                by_geom.setdefault(int(geom_pos[idx]), []).append(int(idx))
+
+            for geom_idxs in by_geom.values():
+                # Prefer the endpoint closest to the seam for each crossing.
+                geom_idxs.sort(key=lambda i: abs(coord[i] - line))
+                keep_for_geom = []
+                for idx in geom_idxs:
+                    if all(
+                        abs(pts[idx, other_axis] - pts[k, other_axis]) > min_sep
+                        for k in keep_for_geom
+                    ):
+                        keep_for_geom.append(idx)
+                chosen.extend(keep_for_geom)
+
             return np.array(chosen, dtype=int)
 
-        side_a = _pick_one_endpoint_per_geom(side_a)
-        side_b = _pick_one_endpoint_per_geom(side_b)
+        side_a = _pick_distinct_endpoints_per_geom(side_a)
+        side_b = _pick_distinct_endpoints_per_geom(side_b)
 
         if len(side_a) == 0 or len(side_b) == 0:
             return
@@ -546,7 +558,11 @@ def _stitch_tile_seams(roads, bbox):
                 gj = side_b[jb]
                 if geom_pos[gi] == geom_pos[gj]:
                     continue
-                if hw_classes[geom_pos[gi]] != hw_classes[geom_pos[gj]]:
+                cls_i = hw_classes[geom_pos[gi]]
+                cls_j = hw_classes[geom_pos[gj]]
+                if cls_i != cls_j and not (
+                    cls_i in major_classes and cls_j in major_classes
+                ):
                     continue
                 dist = float(np.linalg.norm(a_xy[ia] - b_xy[jb]))
                 candidates.append((dist, ia, jb))
