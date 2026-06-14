@@ -14,12 +14,13 @@ dependency, and launches the GUI.
 ### macOS / Linux
 
 ```bash
-python3 -m venv --copies "$HOME/.venvs/maptoposter" && source "$HOME/.venvs/maptoposter/bin/activate" && python -m pip install --upgrade pip && python -m pip install -r requirements.txt && python gui_mode.py
+PROJECT_DIR="$(pwd -P)" && python3 -m venv --copies "$HOME/.venvs/maptoposter" && source "$HOME/.venvs/maptoposter/bin/activate" && cd "$HOME" && python -m pip install --upgrade pip && python -m pip install -r "$PROJECT_DIR/requirements.txt" && cd "$PROJECT_DIR" && python gui_mode.py
 ```
 
 > macOS note: this uses a virtual environment under `$HOME/.venvs` to avoid
 > "Operation not permitted" errors when project folders are in protected
-> locations like `Downloads`.
+> locations like `Downloads`, and runs pip from `$HOME` to avoid macOS
+> `getcwd` permission errors.
 
 ### Windows (PowerShell)
 
