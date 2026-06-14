@@ -79,11 +79,80 @@ _PBF_WORKERS = max(
 #   _SEAM_BRIDGE_DEG : maximum length (deg) of a bridge connector; longer
 #                      candidate pairs are left untouched to avoid wrong joins
 #                      (~0.0025 deg ~= 275 m).
+#   _SEAM_TOL_DEG_MAJOR / _SEAM_BRIDGE_DEG_MAJOR : relaxed equivalents used
+#                      only when both endpoints are major roads (motorway..
+#                      tertiary) so big split trunks can reconnect.
+#   _SEAM_MAJOR_ALONG_CAP_DEG : maximum along-seam gap for secondary/tertiary
+#                      seam joins; prevents long wrong cross-links.
+#   _SEAM_TOP_MAJOR_HEADING_COS : heading-alignment threshold for motorway/
+#                      trunk/primary seam matches (higher = stricter).
+#   _SEAM_TOP_STUB_* : conservative straight-line fallback for unmatched top
+#                      roads right at a seam.
 _SEAM_ENABLED = os.environ.get("PBF_STITCH", "1").strip().lower() not in (
     "0", "false", "no", "off",
 )
 _SEAM_TOL_DEG = float(os.environ.get("PBF_SEAM_TOL", "0.0020"))
 _SEAM_BRIDGE_DEG = float(os.environ.get("PBF_SEAM_BRIDGE", "0.0025"))
+_SEAM_TOL_DEG_MAJOR = float(os.environ.get("PBF_SEAM_TOL_MAJOR", "0.0060"))
+_SEAM_BRIDGE_DEG_MAJOR = float(
+    os.environ.get("PBF_SEAM_BRIDGE_MAJOR", "0.0045")
+)
+_SEAM_MAJOR_ALONG_CAP_DEG = float(
+    os.environ.get("PBF_SEAM_MAJOR_ALONG_CAP", "0.0035")
+)
+_SEAM_TOP_MAJOR_HEADING_COS = float(
+    os.environ.get("PBF_SEAM_TOP_HEADING_COS", "0.75")
+)
+_SEAM_TOP_STUB_MAX_SEAM_DIST_DEG = float(
+    os.environ.get("PBF_SEAM_TOP_STUB_MAX_SEAM_DIST", "0.0015")
+)
+_SEAM_TOP_STUB_MAX_LEN_DEG = float(
+    os.environ.get("PBF_SEAM_TOP_STUB_MAX_LEN", "0.0080")
+)
+_SEAM_TOP_STUB_OVERSHOOT_DEG = float(
+    os.environ.get("PBF_SEAM_TOP_STUB_OVERSHOOT", "0.0004")
+)
+# Long-range heading-locked bridge for top highways (motorway/trunk/primary).
+# Some 1 deg tile extracts simply do not contain the highway all the way to the
+# degree line on one side, leaving a multi-hundred-metre to ~2 km gap with a
+# clean endpoint at the seam on the other side. When a near-seam top-highway
+# endpoint and an opposing top-highway endpoint are almost perfectly collinear
+# and point back across the seam at each other, they are the same physical road
+# and are bridged even across that larger gap. The strong heading-alignment
+# requirement (cos near 1) keeps this from ever joining two unrelated roads.
+_SEAM_LONG_BRIDGE_DEG = float(os.environ.get("PBF_SEAM_LONG_BRIDGE", "0.0200"))
+_SEAM_LONG_BRIDGE_COS = float(
+    os.environ.get("PBF_SEAM_LONG_BRIDGE_COS", "0.93")
+)
+# The long bridge only repairs a genuine data gap: one side must terminate at
+# the seam while its collinear partner sits at least this far back (the other
+# tile simply lacks the road up to the boundary). Where the road already
+# crosses the seam normally, both endpoints sit at the boundary, this gap test
+# fails, and no long bridge is drawn - so continuous roads never get a
+# duplicate/jumpy connector stacked on top of them.
+_SEAM_LONG_BRIDGE_MIN_GAP_DEG = float(
+    os.environ.get("PBF_SEAM_LONG_BRIDGE_MIN_GAP", "0.0040")
+)
+# The partner endpoint must lie almost exactly on the seam-anchored road's
+# projected centre-line. A true single-road continuation has a perpendicular
+# offset of only a few to a few-tens of metres; a parallel carriageway, ramp,
+# or unrelated road sits hundreds of metres off the line. Capping the offset
+# (~150 m) keeps the bridge on one continuous road and stops it hopping
+# sideways between parallel roads (the "jumpy" cross-links).
+_SEAM_LONG_BRIDGE_MAX_PERP_DEG = float(
+    os.environ.get("PBF_SEAM_LONG_BRIDGE_MAX_PERP", "0.00135")
+)
+# A long bridge is only valid across a genuine empty data gap. We sample the
+# interior of the proposed connector and require at least one sample to be far
+# from any existing same-tier road vertex - i.e. there really is an empty
+# stretch to fill. Where the road already runs through the corridor (e.g. the
+# two carriageways of a divided highway, or a road that is simply continuous
+# across the seam via other segments), every interior sample sits right on
+# existing road, no empty stretch is found, and no bridge is drawn. This is
+# what stops the "jumpy" stacked connectors over already-complete roads.
+_SEAM_LONG_BRIDGE_OCC_RADIUS_DEG = float(
+    os.environ.get("PBF_SEAM_LONG_BRIDGE_OCC_RADIUS", "0.0018")
+)
 
 # Approx. metres per degree of latitude (good enough for tile selection).
 _M_PER_DEG = 111_320.0
@@ -483,6 +552,17 @@ def _stitch_tile_seams(roads, bbox):
             return val[0] if val else ""
         return str(val or "")
 
+    _class_rank = {
+        "motorway": 5,
+        "trunk": 4,
+        "primary": 3,
+        "secondary": 2,
+        "tertiary": 1,
+        "local_drive": 0,
+        "path": 0,
+        "local_other": 0,
+    }
+
     def _hw_class(val):
         hw = _norm_hw(val)
         if hw.endswith("_link"):
@@ -505,42 +585,97 @@ def _stitch_tile_seams(roads, bbox):
     connectors = []
     conn_hw = []
     major_classes = {"motorway", "trunk", "primary", "secondary", "tertiary"}
+    top_major_classes = {"motorway", "trunk", "primary"}
+
+    # Compute per-endpoint continuation vectors (interior -> endpoint). These
+    # let us prefer seam joins that continue a road's heading rather than
+    # creating side branches.
+    endpoint_dirs = np.zeros((len(pts), 2), dtype=float)
+    endpoint_has_dir = np.zeros(len(pts), dtype=bool)
+    geom_cache = {}
+    half = len(pts) // 2
+    for ep_idx, geom_idx in enumerate(geom_pos):
+        gidx = int(geom_idx)
+        if gidx not in geom_cache:
+            geom = roads.geometry.iloc[gidx]
+            if geom is None or geom.geom_type != "LineString":
+                geom_cache[gidx] = None
+            else:
+                coords = np.asarray(geom.coords)
+                geom_cache[gidx] = coords if len(coords) >= 2 else None
+        coords = geom_cache[gidx]
+        if coords is None:
+            continue
+        vec = coords[0] - coords[1] if ep_idx < half else coords[-1] - coords[-2]
+        norm = float(np.linalg.norm(vec))
+        if norm > 0:
+            endpoint_dirs[ep_idx] = vec / norm
+            endpoint_has_dir[ep_idx] = True
+
+    # Occupancy index: every vertex of every top-tier road (motorway/trunk/
+    # primary), scaled to roughly isotropic degrees. Used by the long bridge to
+    # confirm a candidate connector really crosses a stretch with no existing
+    # road of the same tier. Restricted to the top tier on purpose: a
+    # secondary/tertiary cross-street running through a motorway data gap must
+    # not make the corridor look occupied.
+    scale_global = np.array([cos_lat, 1.0])
+    occ_tree = None
+    try:
+        all_coords, all_idx = shapely.get_coordinates(
+            roads.geometry.values, return_index=True
+        )
+        if len(all_idx) > 0:
+            occ_mask = np.array(
+                [hw_classes[gx] in top_major_classes for gx in all_idx],
+                dtype=bool,
+            )
+            occ_pts = all_coords[occ_mask]
+            if len(occ_pts) > 0:
+                occ_tree = cKDTree(occ_pts * scale_global)
+    except Exception:  # noqa: BLE001 - occupancy is best-effort
+        occ_tree = None
+
+    def _corridor_has_gap(p_from, p_to):
+        """True if the centre of the segment lies in a genuine empty stretch -
+        i.e. no existing major road runs through the middle of the corridor.
+        A continuous road (or a parallel carriageway) keeps the centre on
+        existing road and is rejected; only a real data hole passes."""
+        if occ_tree is None:
+            return True
+        # Require the central third to be clear, not just a single stray point,
+        # so one incidental empty sample can't admit a bridge over a road that
+        # otherwise exists the whole way.
+        for t in (0.4, 0.5, 0.6):
+            sample = (p_from + (p_to - p_from) * t) * scale_global
+            d, _ = occ_tree.query(sample)
+            if d <= _SEAM_LONG_BRIDGE_OCC_RADIUS_DEG:
+                return False
+        return True
 
     def _bridge(axis, line):
         coord = pts[:, axis]
-        tol = _SEAM_TOL_DEG
+        tol = max(_SEAM_TOL_DEG, _SEAM_TOL_DEG_MAJOR)
         side_a = np.where((coord >= line - tol) & (coord < line) & ~used)[0]
         side_b = np.where((coord >= line) & (coord <= line + tol) & ~used)[0]
 
-        def _pick_distinct_endpoints_per_geom(side_idx):
+        def _pick_closest_endpoint_per_geom(side_idx):
             if len(side_idx) <= 1:
                 return side_idx
-            # A long road can cross the same seam multiple times. Keep one
-            # endpoint per distinct crossing location (grouped by geometry and
-            # separated along the seam axis), not just one per geometry.
-            other_axis = 1 - axis
-            min_sep = max(_SEAM_TOL_DEG * 2.0, _SEAM_BRIDGE_DEG * 0.75)
+            # Keep only the seam-nearest endpoint per geometry on each side.
+            # This avoids picking interior endpoints that can create branches.
             chosen = []
             by_geom = {}
             for idx in side_idx:
                 by_geom.setdefault(int(geom_pos[idx]), []).append(int(idx))
 
             for geom_idxs in by_geom.values():
-                # Prefer the endpoint closest to the seam for each crossing.
                 geom_idxs.sort(key=lambda i: abs(coord[i] - line))
-                keep_for_geom = []
-                for idx in geom_idxs:
-                    if all(
-                        abs(pts[idx, other_axis] - pts[k, other_axis]) > min_sep
-                        for k in keep_for_geom
-                    ):
-                        keep_for_geom.append(idx)
-                chosen.extend(keep_for_geom)
+                chosen.append(geom_idxs[0])
 
             return np.array(chosen, dtype=int)
 
-        side_a = _pick_distinct_endpoints_per_geom(side_a)
-        side_b = _pick_distinct_endpoints_per_geom(side_b)
+        side_a = _pick_closest_endpoint_per_geom(side_a)
+        side_b = _pick_closest_endpoint_per_geom(side_b)
 
         if len(side_a) == 0 or len(side_b) == 0:
             return
@@ -548,30 +683,70 @@ def _stitch_tile_seams(roads, bbox):
         a_xy = pts[side_a] * scale
         b_xy = pts[side_b] * scale
         tree_b = cKDTree(b_xy)
-        candidates = []
+        other_axis = 1 - axis
 
+        def _towards_seam(ep_idx, side_sign):
+            if not endpoint_has_dir[ep_idx]:
+                return False
+            return endpoint_dirs[ep_idx, axis] * side_sign > 1e-9
+
+        def _conn_hw_value(gi, gj, cls_i, cls_j):
+            rank_i = _class_rank.get(cls_i, 0)
+            rank_j = _class_rank.get(cls_j, 0)
+            return (
+                highways[geom_pos[gi]]
+                if rank_i >= rank_j
+                else highways[geom_pos[gj]]
+            )
+
+        # Pass 1: heading-aware joins for top roads (motorway/trunk/primary).
+        # This reconnects true class-A splits while rejecting branchy joins.
+        top_candidates = []
         for ia, gi in enumerate(side_a):
-            near = tree_b.query_ball_point(a_xy[ia], r=_SEAM_BRIDGE_DEG)
+            cls_i = hw_classes[geom_pos[gi]]
+            if cls_i not in top_major_classes:
+                continue
+            if not _towards_seam(gi, +1):
+                continue
+            near = tree_b.query_ball_point(a_xy[ia], r=_SEAM_BRIDGE_DEG_MAJOR)
             if not near:
                 continue
             for jb in near:
                 gj = side_b[jb]
                 if geom_pos[gi] == geom_pos[gj]:
                     continue
-                cls_i = hw_classes[geom_pos[gi]]
                 cls_j = hw_classes[geom_pos[gj]]
-                if cls_i != cls_j and not (
-                    cls_i in major_classes and cls_j in major_classes
+                if cls_j not in top_major_classes:
+                    continue
+                # Same road class only: a motorway gap must be filled by a
+                # motorway, a trunk by a trunk, etc. Never let one road type
+                # auto-fill a gap of a different type.
+                if cls_i != cls_j:
+                    continue
+                if not _towards_seam(gj, -1):
+                    continue
+                vec = pts[gj] - pts[gi]
+                vec_norm = float(np.linalg.norm(vec))
+                if vec_norm <= 0:
+                    continue
+                dist = float(np.linalg.norm((vec * scale)))
+                if dist > _SEAM_BRIDGE_DEG_MAJOR:
+                    continue
+                if not (endpoint_has_dir[gi] and endpoint_has_dir[gj]):
+                    continue
+                vec_u = vec / vec_norm
+                cos_i = float(np.dot(vec_u, endpoint_dirs[gi]))
+                cos_j = float(np.dot(-vec_u, endpoint_dirs[gj]))
+                if (
+                    cos_i < _SEAM_TOP_MAJOR_HEADING_COS
+                    or cos_j < _SEAM_TOP_MAJOR_HEADING_COS
                 ):
                     continue
-                dist = float(np.linalg.norm(a_xy[ia] - b_xy[jb]))
-                candidates.append((dist, ia, jb))
+                conn_hw_val = _conn_hw_value(gi, gj, cls_i, cls_j)
+                top_candidates.append((dist, ia, jb, conn_hw_val))
 
-        if not candidates:
-            return
-
-        candidates.sort(key=lambda x: x[0])
-        for _dist, ia, jb in candidates:
+        top_candidates.sort(key=lambda x: x[0])
+        for _dist, ia, jb, conn_hw_val in top_candidates:
             gi = side_a[ia]
             gj = side_b[jb]
             if used[gi] or used[gj]:
@@ -579,7 +754,205 @@ def _stitch_tile_seams(roads, bbox):
             used[gi] = True
             used[gj] = True
             connectors.append(LineString([tuple(pts[gi]), tuple(pts[gj])]))
-            conn_hw.append(highways[geom_pos[gi]])
+            conn_hw.append(conn_hw_val)
+
+        # Pass 2: generic class-aware matching, but keep lower-major joins
+        # tightly aligned along the seam to prevent random branch connectors.
+        candidates = []
+
+        for ia, gi in enumerate(side_a):
+            if used[gi]:
+                continue
+            cls_i = hw_classes[geom_pos[gi]]
+            radius = (
+                _SEAM_BRIDGE_DEG_MAJOR
+                if cls_i in major_classes
+                else _SEAM_BRIDGE_DEG
+            )
+            near = tree_b.query_ball_point(a_xy[ia], r=radius)
+            if not near:
+                continue
+            for jb in near:
+                gj = side_b[jb]
+                if used[gj]:
+                    continue
+                if geom_pos[gi] == geom_pos[gj]:
+                    continue
+                cls_j = hw_classes[geom_pos[gj]]
+                # Pass-2 is intentionally strict: only same-class joins.
+                # Cross-class top-road joins are handled in pass-1 with
+                # heading checks; allowing them here can create seam branches.
+                if cls_i != cls_j:
+                    continue
+                dist = float(np.linalg.norm(a_xy[ia] - b_xy[jb]))
+                max_dist = (
+                    _SEAM_BRIDGE_DEG_MAJOR
+                    if cls_i in major_classes and cls_j in major_classes
+                    else _SEAM_BRIDGE_DEG
+                )
+                if dist > max_dist:
+                    continue
+                if cls_i in major_classes and cls_j in major_classes:
+                    if (
+                        cls_i in {"secondary", "tertiary"}
+                        or cls_j in {"secondary", "tertiary"}
+                    ):
+                        along_gap = abs(float(pts[gi, other_axis] - pts[gj, other_axis]))
+                        if along_gap > _SEAM_MAJOR_ALONG_CAP_DEG:
+                            continue
+                conn_hw_val = _conn_hw_value(gi, gj, cls_i, cls_j)
+                candidates.append((dist, ia, jb, conn_hw_val))
+
+        candidates.sort(key=lambda x: x[0])
+        for _dist, ia, jb, conn_hw_val in candidates:
+            gi = side_a[ia]
+            gj = side_b[jb]
+            if used[gi] or used[gj]:
+                continue
+            used[gi] = True
+            used[gj] = True
+            connectors.append(LineString([tuple(pts[gi]), tuple(pts[gj])]))
+            conn_hw.append(conn_hw_val)
+
+        # Pass 2.5: long-range heading-locked gap bridge for top highways
+        # (motorway/trunk/primary). This runs only AFTER the normal short
+        # passes, on endpoints they could not match, so a road that already
+        # crosses the seam is never given a duplicate long connector. It
+        # repairs the case where one tile extract simply lacks the highway up
+        # to the degree line: a seam-anchored top endpoint is joined to its
+        # collinear partner sitting farther back across the boundary. Strong
+        # heading alignment plus a genuine-gap requirement (the partner must be
+        # well past normal seam range) keep it from ever linking parallel
+        # carriageways or unrelated roads.
+        long_band = _SEAM_LONG_BRIDGE_DEG / max(0.1, scale[axis])
+        long_a = np.where(
+            (coord >= line - long_band) & (coord < line) & ~used
+        )[0]
+        long_b = np.where(
+            (coord >= line) & (coord <= line + long_band) & ~used
+        )[0]
+
+        def _top_endpoints(idxs):
+            return [
+                int(i)
+                for i in idxs
+                if hw_classes[geom_pos[i]] in top_major_classes
+                and endpoint_has_dir[i]
+            ]
+
+        top_a = _top_endpoints(long_a)
+        top_b = _top_endpoints(long_b)
+        if top_a and top_b:
+            long_pairs = []
+            for gi in top_a:
+                toward_a = _towards_seam(gi, +1)
+                seam_i = abs(coord[gi] - line)
+                for gj in top_b:
+                    if geom_pos[gi] == geom_pos[gj]:
+                        continue
+                    # Same road class only: a long gap is bridged with the
+                    # exact same highway type on both sides, so a road of one
+                    # type can never auto-fill a gap of a different type.
+                    if hw_classes[geom_pos[gi]] != hw_classes[geom_pos[gj]]:
+                        continue
+                    seam_j = abs(coord[gj] - line)
+                    # One side must terminate right at the seam ...
+                    if min(seam_i, seam_j) > _SEAM_TOL_DEG_MAJOR:
+                        continue
+                    # ... and the other must sit well back across the boundary
+                    # (a genuine data gap). A road that already crosses cleanly
+                    # has both ends at the seam and is rejected here.
+                    if max(seam_i, seam_j) < _SEAM_LONG_BRIDGE_MIN_GAP_DEG:
+                        continue
+                    if not (toward_a and _towards_seam(gj, -1)):
+                        continue
+                    vec = pts[gj] - pts[gi]
+                    vec_norm = float(np.linalg.norm(vec))
+                    if vec_norm <= 0:
+                        continue
+                    dist = float(np.linalg.norm(vec * scale))
+                    if dist > _SEAM_LONG_BRIDGE_DEG:
+                        continue
+                    vec_u = vec / vec_norm
+                    cos_i = float(np.dot(vec_u, endpoint_dirs[gi]))
+                    cos_j = float(np.dot(-vec_u, endpoint_dirs[gj]))
+                    if (
+                        cos_i < _SEAM_LONG_BRIDGE_COS
+                        or cos_j < _SEAM_LONG_BRIDGE_COS
+                    ):
+                        continue
+                    # Perpendicular offset of gj from the seam-anchored road's
+                    # projected centre-line (gi + t * heading). A true single
+                    # road continues straight through; a parallel road sits
+                    # well off the line and is rejected, so the bridge never
+                    # hops sideways between parallel carriageways.
+                    ray = endpoint_dirs[gi] * scale
+                    ray_norm = float(np.linalg.norm(ray))
+                    if ray_norm <= 0:
+                        continue
+                    ray = ray / ray_norm
+                    rel = vec * scale
+                    along = float(np.dot(rel, ray))
+                    perp = float(np.linalg.norm(rel - along * ray))
+                    if perp > _SEAM_LONG_BRIDGE_MAX_PERP_DEG:
+                        continue
+                    # Only bridge a genuinely empty corridor. If existing major
+                    # road already runs the whole way between the endpoints,
+                    # this is not a real gap (e.g. a divided-highway carriageway
+                    # or a road continuous via other segments) and is skipped.
+                    if not _corridor_has_gap(pts[gi], pts[gj]):
+                        continue
+                    cls_i = hw_classes[geom_pos[gi]]
+                    cls_j = hw_classes[geom_pos[gj]]
+                    conn_hw_val = _conn_hw_value(gi, gj, cls_i, cls_j)
+                    long_pairs.append((dist, perp, gi, gj, conn_hw_val))
+
+            # Shortest gap first (the true continuation is the nearest collinear
+            # partner), with perpendicular offset as the tiebreaker, so each
+            # endpoint grabs its real partner before any longer/looser pair.
+            long_pairs.sort(key=lambda x: (x[0], x[1]))
+            for _dist, _perp, gi, gj, conn_hw_val in long_pairs:
+                if used[gi] or used[gj]:
+                    continue
+                used[gi] = True
+                used[gj] = True
+                connectors.append(LineString([tuple(pts[gi]), tuple(pts[gj])]))
+                conn_hw.append(conn_hw_val)
+
+        # Pass 3: conservative straight-line fallback for unmatched top roads
+        # sitting right at the seam. This avoids visible breaks when one side
+        # lacks a safe counterpart, without drawing long speculative branches.
+        def _add_top_stub(ep_idx, side_sign):
+            if used[ep_idx]:
+                return
+            cls = hw_classes[geom_pos[ep_idx]]
+            if cls not in top_major_classes:
+                return
+            if not _towards_seam(ep_idx, side_sign):
+                return
+            seam_dist = abs(float(coord[ep_idx] - line))
+            if seam_dist > _SEAM_TOP_STUB_MAX_SEAM_DIST_DEG:
+                return
+            step = endpoint_dirs[ep_idx, axis] * side_sign
+            if step <= 0:
+                return
+            to_seam_len = seam_dist / abs(endpoint_dirs[ep_idx, axis])
+            seg_len = min(
+                to_seam_len + _SEAM_TOP_STUB_OVERSHOOT_DEG,
+                _SEAM_TOP_STUB_MAX_LEN_DEG,
+            )
+            if seg_len <= 0:
+                return
+            p0 = pts[ep_idx]
+            p1 = p0 + endpoint_dirs[ep_idx] * seg_len
+            connectors.append(LineString([tuple(p0), tuple(p1)]))
+            conn_hw.append(highways[geom_pos[ep_idx]])
+            used[ep_idx] = True
+
+        for gi in side_a:
+            _add_top_stub(gi, +1)
+        for gj in side_b:
+            _add_top_stub(gj, -1)
 
     for line in lon_lines:
         _bridge(0, line)
