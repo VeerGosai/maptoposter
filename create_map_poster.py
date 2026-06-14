@@ -404,13 +404,13 @@ _ROAD_TIERS = [
         {"residential", "living_street", "unclassified", "service",
          "road", "track", "path", "footway", "cycleway",
          "bridleway", "steps", "pedestrian"},
-        "road_residential", 0.2, True,
+                "road_residential", 0.14, True,
     ),
-    ({"tertiary", "tertiary_link"},        "road_tertiary",   0.4, True),
-    ({"secondary", "secondary_link"},      "road_secondary",  0.7, False),
+        ({"tertiary", "tertiary_link"},        "road_tertiary",   0.28, True),
+        ({"secondary", "secondary_link"},      "road_secondary",  0.5, False),
     ({"trunk", "trunk_link",
-      "primary", "primary_link"},          "road_primary",    1.0, False),
-    ({"motorway", "motorway_link"},         "road_motorway",   1.3, False),
+            "primary", "primary_link"},          "road_primary",    0.8, False),
+        ({"motorway", "motorway_link"},         "road_motorway",   1.05, False),
 ]
 
 
@@ -466,7 +466,7 @@ def plot_roads_layered(edges_gdf, ax, dist, road_width_mult=1.0):
     mask_other = edges_gdf["highway"].apply(lambda v: _hw(v) not in all_typed)
     other = edges_gdf[mask_other]
     if not other.empty:
-        width = 0.4 * minor_scale * road_width_mult
+        width = 0.25 * minor_scale * road_width_mult
         if width >= 0.05:
             other.plot(ax=ax,
                        color=THEME.get("road_default", "#666666"),
@@ -585,8 +585,10 @@ def get_crop_limits(crs, center_lat_lon, fig, dist):
 
 
 def _graph_cache_key(point, dist) -> str:
+    # Bump cache schema whenever graph-fetch detail rules change.
+    schema = "v2"
     lat, lon = point
-    return f"graph_{lat}_{lon}_{dist}"
+    return f"graph_{schema}_{lat}_{lon}_{dist}"
 
 
 def _features_cache_key(point, dist, tags, name) -> str:
@@ -641,21 +643,16 @@ def _fetch_graph_api(point, dist) -> MultiDiGraph | None:
     """Hit Overpass for the street network. No cache lookups here.
 
     Graduated detail level so we don't ask Overpass for a query it will refuse:
-      - <= 30 km radius: every way (network_type='all', footways/cycleways/service).
-            - 30 km - 200 km: all drivable roads (network_type='drive'); includes
-        residential/unclassified streets but skips footways/service alleys.
-        This is what gives "detailed" 200 km posters their street texture.
-            - > 200 km: trunk/primary/secondary/tertiary only (the bbox is huge at
+      - <= 200 km radius: all highway-tagged ways, including fine-grain paths
+        (footways/cycleways/service/track/path).
+      - > 200 km: trunk/primary/secondary/tertiary only (the bbox is huge at
         that point and Overpass will refuse anything denser).
     """
-    if dist <= 30_000:
-        return ox.graph_from_point(
-            point, dist=dist, dist_type='bbox',
-            network_type='all', truncate_by_edge=True)
     if dist <= 200_000:
+        all_highway_filter = '["highway"]'
         return ox.graph_from_point(
             point, dist=dist, dist_type='bbox',
-            network_type='drive', truncate_by_edge=True)
+            custom_filter=all_highway_filter, truncate_by_edge=True)
     custom_filter = (
         '["highway"~"motorway|motorway_link|trunk|trunk_link'
         '|primary|primary_link|secondary|secondary_link'

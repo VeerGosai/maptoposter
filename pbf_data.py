@@ -119,15 +119,12 @@ def _lines_where_for_dist(dist):
 
     Mirrors the live-API path's graduated detail levels so large-extent posters
     stay fast and legible instead of drowning in footpaths:
-      - <= 30 km : every highway (full street texture).
-      - 30-200 km: drivable roads only.
+      - <= 200 km: every highway (full street texture, including paths).
       - > 200 km : major roads only (motorway..tertiary).
     Coastline ways are always included regardless of distance.
     """
-    if dist <= 30_000:
+    if dist <= 200_000:
         roads = "highway IS NOT NULL"
-    elif dist <= 200_000:
-        roads = _DRIVE_HW_WHERE
     else:
         roads = _MAJOR_HW_WHERE
     return f"({roads}) OR {_COAST_WHERE}"
