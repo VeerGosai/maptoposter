@@ -46,3 +46,6 @@ TEMP/
 TEMP
 fonts/
 cache/
+# Generated poster/image outputs
+posters/
+pr_examples/
