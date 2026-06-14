@@ -12,6 +12,7 @@ import asyncio
 import json
 import os
 import pickle
+import ssl
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -39,6 +40,39 @@ import pbf_data
 # local folder or CDN) or "api" (live Overpass/OSM). Override with the
 # DATA_SOURCE env var or the --data-source CLI flag.
 DATA_SOURCE = os.environ.get("DATA_SOURCE", "pbf")
+
+
+def _configure_tls_ca_bundle() -> None:
+    """Prefer certifi's CA bundle to avoid system trust-store mismatches."""
+    try:
+        import certifi
+    except ImportError:
+        return
+
+    try:
+        ca_bundle = certifi.where()
+    except Exception:
+        return
+
+    if ca_bundle:
+        os.environ.setdefault("SSL_CERT_FILE", ca_bundle)
+        os.environ.setdefault("REQUESTS_CA_BUNDLE", ca_bundle)
+
+
+def _build_geocoder_ssl_context() -> ssl.SSLContext | None:
+    """Return an SSL context backed by certifi, when available."""
+    try:
+        import certifi
+    except ImportError:
+        return None
+
+    try:
+        return ssl.create_default_context(cafile=certifi.where())
+    except Exception:
+        return None
+
+
+_configure_tls_ca_bundle()
 
 
 
@@ -451,7 +485,14 @@ def get_coordinates(city, country):
         return cached
 
     print("Looking up coordinates...")
-    geolocator = Nominatim(user_agent="city_map_poster", timeout=10)
+    geolocator_kwargs = {
+        "user_agent": "city_map_poster",
+        "timeout": 10,
+    }
+    ssl_context = _build_geocoder_ssl_context()
+    if ssl_context is not None:
+        geolocator_kwargs["ssl_context"] = ssl_context
+    geolocator = Nominatim(**geolocator_kwargs)
 
     # Add a small delay to respect Nominatim's usage policy
     time.sleep(1)
@@ -459,6 +500,15 @@ def get_coordinates(city, country):
     try:
         location = geolocator.geocode(f"{city}, {country}")
     except Exception as e:
+        err = str(e)
+        if (
+            "CERTIFICATE_VERIFY_FAILED" in err
+            or "unable to get local issuer certificate" in err
+        ):
+            raise ValueError(
+                f"Geocoding failed for {city}, {country}: TLS certificate verification failed. "
+                "Please re-run setup so certifi is installed, then try again."
+            ) from e
         raise ValueError(f"Geocoding failed for {city}, {country}: {e}") from e
 
     # If geocode returned a coroutine in some environments, run it to get the result.
