@@ -32,6 +32,14 @@ from shapely.geometry import Point
 from tqdm import tqdm
 
 from font_management import load_fonts
+import pbf_data
+
+
+# Default data source for map generation: "pbf" (offline 1x1 degree tiles,
+# local folder or CDN) or "api" (live Overpass/OSM). Override with the
+# DATA_SOURCE env var or the --data-source CLI flag.
+DATA_SOURCE = os.environ.get("DATA_SOURCE", "pbf")
+
 
 
 class CacheError(Exception):
@@ -380,24 +388,20 @@ def _minor_road_scale(dist):
     return max(0.15, 1.0 - (dist - 100_000) / 117_647)
 
 
-def plot_roads_layered(g_proj, ax, dist, road_width_mult=1.0):
+def plot_roads_layered(edges_gdf, ax, dist, road_width_mult=1.0):
     """Draw roads in hierarchical passes so major roads always render on top.
-    Minor roads are progressively thinned at distances > 100 km."""
+    Minor roads are progressively thinned at distances > 100 km.
+
+    ``edges_gdf`` is a (projected) GeoDataFrame of road geometries with a
+    ``highway`` column. Both the live-API path and the offline PBF path feed
+    this same representation in, so rendering is identical regardless of source.
+    """
     def _hw(val):
         if isinstance(val, list):
             return val[0] if val else "unclassified"
         return val or "unclassified"
 
-    try:
-        _, edges_gdf = ox.graph_to_gdfs(g_proj)
-    except Exception:
-        # Fallback: single-pass legacy rendering
-        edge_colors = get_edge_colors_by_type(g_proj)
-        edge_widths = [w * road_width_mult
-                       for w in get_edge_widths_by_type(g_proj)]
-        ox.plot_graph(g_proj, ax=ax, bgcolor=THEME['bg'], node_size=0,
-                      edge_color=edge_colors, edge_linewidth=edge_widths,
-                      show=False, close=False)
+    if edges_gdf is None or len(edges_gdf) == 0 or "highway" not in edges_gdf.columns:
         return
 
     minor_scale = _minor_road_scale(dist)
@@ -415,7 +419,13 @@ def plot_roads_layered(g_proj, ax, dist, road_width_mult=1.0):
         if width < 0.05:
             continue
         color = THEME.get(color_key, THEME.get("road_default", "#666666"))
-        subset.plot(ax=ax, color=color, linewidth=width, zorder=zorder)
+        # Rounded caps/joins extend each stroke half a linewidth past its end
+        # points, which fuses the hairline seam where a road is split across a
+        # 1 deg x 1 deg tile boundary (the two halves become separate
+        # LineStrings whose coincident endpoints would otherwise show a gap
+        # with the default flat "butt" caps).
+        subset.plot(ax=ax, color=color, linewidth=width, zorder=zorder,
+                    capstyle="round", joinstyle="round")
 
     # Catch any highway types not covered by the tier table
     mask_other = edges_gdf["highway"].apply(lambda v: _hw(v) not in all_typed)
@@ -425,7 +435,8 @@ def plot_roads_layered(g_proj, ax, dist, road_width_mult=1.0):
         if width >= 0.05:
             other.plot(ax=ax,
                        color=THEME.get("road_default", "#666666"),
-                       linewidth=width, zorder=2)
+                       linewidth=width, zorder=2,
+                       capstyle="round", joinstyle="round")
 
 
 def get_coordinates(city, country):
@@ -482,19 +493,23 @@ def get_coordinates(city, country):
     raise ValueError(f"Could not find coordinates for {city}, {country}")
 
 
-def get_crop_limits(g_proj, center_lat_lon, fig, dist):
+def get_crop_limits(crs, center_lat_lon, fig, dist):
     """
     Crop inward to preserve aspect ratio while guaranteeing
     full coverage of the requested radius.
+
+    ``crs`` is the projected coordinate reference system the map is drawn in
+    (anything pyproj/geopandas accepts). The centre point is reprojected from
+    lat/lon into that CRS so the crop window lines up with the plotted data.
     """
     lat, lon = center_lat_lon
 
-    # Project center point into graph CRS
+    # Project center point into the map CRS
     center = (
         ox.projection.project_geometry(
             Point(lon, lat),
             crs="EPSG:4326",
-            to_crs=g_proj.graph["crs"]
+            to_crs=crs
         )[0]
     )
     center_x, center_y = center.x, center.y
@@ -659,7 +674,7 @@ def fetch_features(point, dist, tags, name) -> GeoDataFrame | None:
     return data
 
 
-def prefetch_map_elements(point, dist):
+def _prefetch_api_elements(point, dist):
     """
     Resolve all map elements (graph + features) needed for a poster.
 
@@ -767,6 +782,80 @@ def prefetch_map_elements(point, dist):
     return results
 
 
+def _graph_to_roads_gdf(graph):
+    """Convert an OSMnx graph into an EPSG:4326 edges GeoDataFrame.
+
+    Returns None if the graph is missing/empty. The resulting GDF carries a
+    ``highway`` column so it renders through the same path as PBF roads.
+    """
+    if graph is None:
+        return None
+    try:
+        edges = ox.graph_to_gdfs(graph, nodes=False, fill_edge_geometry=True)
+    except Exception as e:
+        print(f"Could not convert street graph to GeoDataFrame: {e}")
+        return None
+    if edges is None or edges.empty:
+        return None
+    if "highway" not in edges.columns:
+        edges["highway"] = "unclassified"
+    return edges
+
+
+def prefetch_map_elements(point, dist, source=None, include_polygons=True):
+    """Resolve every map element needed for a poster from the chosen source.
+
+    Args:
+        point: (latitude, longitude) tuple of the map centre.
+        dist:  Half-width of the map bounding box in metres.
+        source: "pbf" (offline 1x1 degree tiles, default) or "api" (live
+            Overpass). Falls back to the module ``DATA_SOURCE`` default.
+        include_polygons: When False, skip loading water/parks polygon layers
+            entirely (PBF path only). Faster and avoids broken-geometry work
+            when the poster won't draw any area features.
+
+    Returns:
+        dict with keys 'roads', 'water', 'parks', 'coastline'. 'roads' is an
+        EPSG:4326 GeoDataFrame with a 'highway' column; the rest are feature
+        GeoDataFrames (any may be None/empty). Identical shape for both
+        sources so the renderer never needs to care where data came from.
+    """
+    source = (source or DATA_SOURCE or "pbf").lower()
+
+    if source == "pbf":
+        try:
+            return pbf_data.load_pbf_elements(
+                point, dist, include_polygons=include_polygons)
+        except pbf_data.PBFDataError as e:
+            raise RuntimeError(str(e)) from e
+
+    # --- Live API path -----------------------------------------------------
+    raw = _prefetch_api_elements(point, dist)
+    return {
+        "roads": _graph_to_roads_gdf(raw.get("graph")),
+        "water": raw.get("water"),
+        "parks": raw.get("parks"),
+        "coastline": raw.get("coastline"),
+    }
+
+
+def project_to_crs(gdf, crs=None):
+    """Project a GeoDataFrame to a metric CRS (UTM if ``crs`` is None).
+
+    Returns the input unchanged if it is None/empty. Falls back to a plain
+    ``to_crs`` if OSMnx's UTM helper rejects the geometry.
+    """
+    if gdf is None or len(gdf) == 0:
+        return gdf
+    try:
+        return ox.projection.project_gdf(gdf, to_crs=crs)
+    except Exception:
+        try:
+            return gdf.to_crs(crs) if crs is not None else gdf
+        except Exception:
+            return gdf
+
+
 def create_poster(
     city,
     country,
@@ -781,6 +870,7 @@ def create_poster(
     display_city=None,
     display_country=None,
     fonts=None,
+    data_source=None,
 ):
     """
     Generate a complete map poster with roads, water, parks, and typography.
@@ -799,6 +889,7 @@ def create_poster(
         height: Poster height in inches (default: 16)
         country_label: Optional override for country text on poster
         _name_label: Optional override for city name (unused, reserved for future use)
+        data_source: "pbf" (offline tiles, default) or "api" (live Overpass).
 
     Raises:
         RuntimeError: If street network data cannot be retrieved
@@ -813,15 +904,16 @@ def create_poster(
     # Compensate for viewport crop so we always have enough data to fill the canvas.
     compensated_dist = dist * (max(height, width) / min(height, width)) / 4
 
-    # Resolve every element up-front: cache hits are instant, misses are
-    # downloaded from Overpass in parallel with per-element retries.
-    elements = prefetch_map_elements(point, compensated_dist)
-    g = elements["graph"]
+    # Resolve every element up-front. For PBF (default) this reads the local
+    # 1x1 degree tiles (or downloads them from the CDN); for API it fetches
+    # from Overpass with caching + retries.
+    elements = prefetch_map_elements(point, compensated_dist, source=data_source)
+    roads = elements["roads"]
     water = elements["water"]
     parks = elements["parks"]
     coastline = elements["coastline"]
 
-    if g is None:
+    if roads is None or len(roads) == 0:
         raise RuntimeError("Failed to retrieve street network data.")
 
     print("✓ All data retrieved successfully!")
@@ -835,8 +927,10 @@ def create_poster(
     ax = fig.add_axes([0, 0, 1, 1])
     ax.set_facecolor(THEME["bg"])
 
-    # Project graph to a metric CRS so distances and aspect are linear (meters)
-    g_proj = ox.project_graph(g)
+    # Project roads to a metric CRS (auto UTM) so distances and aspect are
+    # linear (meters). Every other layer is projected into the same CRS.
+    roads_proj = project_to_crs(roads)
+    map_crs = roads_proj.crs
 
     # 3. Plot Layers
     # Layer 1: Polygons (filter to only plot polygon/multipolygon geometries, not points)
@@ -844,22 +938,14 @@ def create_poster(
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         water_polys = water[water.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not water_polys.empty:
-            # Project water features in the same CRS as the graph
-            try:
-                water_polys = ox.projection.project_gdf(water_polys)
-            except Exception:
-                water_polys = water_polys.to_crs(g_proj.graph['crs'])
+            water_polys = project_to_crs(water_polys, map_crs)
             water_polys.plot(ax=ax, facecolor=THEME['water'], edgecolor='none', zorder=0.5)
 
     if parks is not None and not parks.empty:
         # Filter to only polygon/multipolygon geometries to avoid point features showing as dots
         parks_polys = parks[parks.geometry.type.isin(["Polygon", "MultiPolygon"])]
         if not parks_polys.empty:
-            # Project park features in the same CRS as the graph
-            try:
-                parks_polys = ox.projection.project_gdf(parks_polys)
-            except Exception:
-                parks_polys = parks_polys.to_crs(g_proj.graph['crs'])
+            parks_polys = project_to_crs(parks_polys, map_crs)
             parks_polys.plot(ax=ax, facecolor=THEME['parks'], edgecolor='none', zorder=0.8)
 
     # Layer 1.5: Coastline
@@ -867,19 +953,16 @@ def create_poster(
         coast_geoms = coastline[coastline.geometry.type.isin(
             ["LineString", "MultiLineString", "Polygon", "MultiPolygon"])]
         if not coast_geoms.empty:
-            try:
-                coast_geoms = ox.projection.project_gdf(coast_geoms)
-            except Exception:
-                coast_geoms = coast_geoms.to_crs(g_proj.graph['crs'])
+            coast_geoms = project_to_crs(coast_geoms, map_crs)
             coast_color = THEME.get('coastline', THEME.get('water', '#4a90d9'))
             coast_geoms.plot(ax=ax, edgecolor=coast_color, facecolor='none',
-                             linewidth=2.0, zorder=1.5)
+                             linewidth=0.5, alpha=0.6, zorder=1.5)
 
     # Layer 2: Roads — drawn tier by tier, lowest class first so major
     # roads always render on top. Minor roads are thinned at large scales.
     print("Applying road hierarchy colors...")
-    crop_xlim, crop_ylim = get_crop_limits(g_proj, point, fig, compensated_dist)
-    plot_roads_layered(g_proj, ax, compensated_dist)
+    crop_xlim, crop_ylim = get_crop_limits(map_crs, point, fig, compensated_dist)
+    plot_roads_layered(roads_proj, ax, compensated_dist)
     ax.set_xlim(crop_xlim)
     ax.set_ylim(crop_ylim)
 
@@ -1238,6 +1321,18 @@ Examples:
         choices=["png", "svg", "pdf"],
         help="Output format for the poster (default: png)",
     )
+    parser.add_argument(
+        "--data-source",
+        "-ds",
+        dest="data_source",
+        default=DATA_SOURCE,
+        choices=["pbf", "api"],
+        help=(
+            "Map data source: 'pbf' = offline 1x1 degree OSM tiles from the "
+            "local '1/' folder or the CDN (default, fast); 'api' = live "
+            "Overpass/OSM download (slower)."
+        ),
+    )
 
     # --- GUI mode: launch if first argument is "GUI" ---
     if len(sys.argv) >= 2 and sys.argv[1].upper() == "GUI":
@@ -1326,6 +1421,7 @@ Examples:
                 display_city=args.display_city,
                 display_country=args.display_country,
                 fonts=custom_fonts,
+                data_source=args.data_source,
             )
 
         print("\n" + "=" * 50)

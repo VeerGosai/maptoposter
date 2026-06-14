@@ -10,6 +10,7 @@ import json
 import math
 import os
 import platform
+import queue
 import random
 import subprocess
 import threading
@@ -26,6 +27,13 @@ THEMES_DIR = "themes"
 POSTERS_DIR = os.environ.get("EXPORTS_DIR", "exports")
 CACHE_DIR = os.environ.get("CACHE_DIR", "cache")
 FILE_ENCODING = "utf-8"
+
+# Map data source selector (PBF offline tiles vs live OSM API).
+DATA_SOURCE_LABELS = {
+    "PBF Files": "pbf",
+    "OSM API": "api",
+}
+DEFAULT_DATA_SOURCE_LABEL = "PBF Files"
 
 C_BG       = "#111117"
 C_PANEL    = "#1a1a24"
@@ -75,6 +83,9 @@ DISTANCE_PRESETS = {
     "Super Region (80 km)": 80000, "Giant Region (90 km)": 90000,
     "Max Region (100 km)": 100000, "Country Scale (120 km)": 120000,
     "Wide Country (150 km)": 150000, "Macro Region (200 km)": 200000,
+    "Large Country (300 km)": 300000, "Half Continent (400 km)": 400000,
+    "Continental (500 km)": 500000, "Subcontinent (650 km)": 650000,
+    "Vast Region (800 km)": 800000, "Maximum (1000 km)": 1000000,
 }
 
 ZOOM_LABELS = {
@@ -85,9 +96,12 @@ ZOOM_LABELS = {
     60000: "Conurbation", 70000: "Mega region",
     80000: "Super region", 90000: "Giant region", 100000: "Max region",
     120000: "Country scale", 150000: "Wide country", 200000: "Macro region",
+    300000: "Large country", 400000: "Half continent",
+    500000: "Continental", 650000: "Subcontinent",
+    800000: "Vast region", 1000000: "Maximum",
 }
 
-DPI_OPTIONS = [150, 200, 300, 400, 600]
+DPI_OPTIONS = [150, 200, 300, 400, 600, 900, 1200]
 
 FONT_FAMILY = "Poppins"
 
@@ -135,6 +149,18 @@ def _estimated_filesize(fmt, w, h, dpi):
     else:
         mb = w * h * 0.25
     return f"~{mb*1024:.0f} KB" if mb < 1 else f"~{mb:.1f} MB"
+
+
+def _human_bytes(n):
+    """Format a byte count as a short human-readable string."""
+    n = float(n or 0)
+    if n < 1024:
+        return f"{n:.0f} B"
+    for unit in ("KB", "MB", "GB"):
+        n /= 1024
+        if n < 1024 or unit == "GB":
+            return f"{n:.1f} {unit}"
+    return f"{n:.1f} GB"
 
 
 def _open_path(path):
@@ -647,6 +673,9 @@ class MapPosterGUI:
         self.var_width = tk.DoubleVar(value=12.0)
         self.var_height = tk.DoubleVar(value=16.0)
         self.var_format = tk.StringVar(value="png")
+        self.var_fmt_png = tk.BooleanVar(value=True)
+        self.var_fmt_svg = tk.BooleanVar(value=False)
+        self.var_fmt_pdf = tk.BooleanVar(value=False)
         self.var_dpi = tk.IntVar(value=300)
         self.var_lat = tk.StringVar()
         self.var_lon = tk.StringVar()
@@ -660,14 +689,15 @@ class MapPosterGUI:
         self.var_dark_themes = tk.BooleanVar(value=False)
         self.var_light_themes = tk.BooleanVar(value=False)
         self.var_risk_themes = tk.BooleanVar(value=False)
-        self.var_show_water = tk.BooleanVar(value=True)
-        self.var_show_parks = tk.BooleanVar(value=True)
+        self.var_show_water = tk.BooleanVar(value=False)
+        self.var_show_parks = tk.BooleanVar(value=False)
         self.var_show_coastline = tk.BooleanVar(value=True)
         self.var_show_gradient = tk.BooleanVar(value=True)
-        self.var_show_attribution = tk.BooleanVar(value=True)
-        self.var_show_typography = tk.BooleanVar(value=True)
+        self.var_show_attribution = tk.BooleanVar(value=False)
+        self.var_show_typography = tk.BooleanVar(value=False)
         self.var_road_width_mult = tk.DoubleVar(value=1.0)
         self.var_orientation = tk.StringVar(value="Portrait")
+        self.var_data_source = tk.StringVar(value=DEFAULT_DATA_SOURCE_LABEL)
         self.var_zoom_label = tk.StringVar(value=_zoom_label(18000))
         self.var_est_size = tk.StringVar(value="")
         self.var_bg_override = tk.StringVar()
@@ -678,10 +708,17 @@ class MapPosterGUI:
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_text = tk.StringVar(value="Idle")
 
+        # Thread-safe channel for PBF tile-load progress events. Worker threads
+        # only ever push onto this queue; the grid is updated exclusively by
+        # the main thread via _pump_pbf_events so Tkinter is never touched off
+        # the main thread (which is what made the grid freeze until done).
+        self._pbf_event_queue = queue.Queue()
+
         self._build_ui()
         self._draw_theme_preview()
         self._update_estimates()
         self._tick_stats()
+        self._pump_pbf_events()
 
     # ==================================================================
     # BUILD UI
@@ -890,13 +927,6 @@ class MapPosterGUI:
         self.sec_location.pack(fill=tk.X)
         self._build_location(self.sec_location.body)
 
-        self.sec_labels = AccordionSection(
-            f, "Display Labels",
-            preview_func=lambda: self.var_display_city.get() or "default",
-            open_by_default=False)
-        self.sec_labels.pack(fill=tk.X)
-        self._build_labels(self.sec_labels.body)
-
         self.sec_theme = AccordionSection(
             f, "Theme",
             preview_func=lambda: self.var_theme.get(),
@@ -922,13 +952,6 @@ class MapPosterGUI:
         self.sec_output.pack(fill=tk.X)
         self._build_output(self.sec_output.body)
 
-        self.sec_typo = AccordionSection(
-            f, "Typography",
-            preview_func=lambda: self.var_font_family.get() or "Poppins",
-            open_by_default=False)
-        self.sec_typo.pack(fill=tk.X)
-        self._build_typography(self.sec_typo.body)
-
         self.sec_adv = AccordionSection(
             f, "Advanced",
             preview_func=lambda: (
@@ -951,6 +974,12 @@ class MapPosterGUI:
         if w:
             w.pack(side=tk.LEFT, fill=tk.X, expand=True)
         return r
+
+    def _subheader(self, parent, text):
+        tk.Label(parent, text=text.upper(), bg=C_PANEL, fg=C_TEXT_DIM,
+                 font=(FONT_FAMILY, 10, "bold"),
+                 anchor="w").pack(anchor="w", pady=(10, 2))
+        tk.Frame(parent, bg=C_BORDER, height=1).pack(fill=tk.X, pady=(0, 4))
 
     def _build_location(self, body):
         self._row(body, "Preset", lambda p: FlatOptionMenu(
@@ -1029,6 +1058,20 @@ class MapPosterGUI:
                 lambda e: self._pick_color(self.var_text_override))
 
     def _build_map_settings(self, body):
+        r0 = tk.Frame(body, bg=C_PANEL)
+        r0.pack(fill=tk.X, pady=3)
+        tk.Label(r0, text="Data Source", bg=C_PANEL, fg=C_TEXT_DIM,
+                 font=(FONT_FAMILY, 11), width=14,
+                 anchor="w").pack(side=tk.LEFT)
+        FlatRadio(r0, list(DATA_SOURCE_LABELS.keys()),
+                  self.var_data_source).pack(side=tk.LEFT)
+        tk.Label(body,
+                 text="PBF: offline 1\u00b0 tiles (local '1/' or CDN, fast). "
+                      "OSM API: live Overpass (slower).",
+                 bg=C_PANEL, fg=C_TEXT_MUT, justify="left",
+                 font=(FONT_FAMILY, 9), anchor="w",
+                 wraplength=300).pack(anchor="w", pady=(0, 4))
+
         self._row(body, "Distance Preset", lambda p: FlatOptionMenu(
             p, self.var_distance_preset, list(DISTANCE_PRESETS.keys()),
             command=self._on_distance_preset, width=24))
@@ -1038,7 +1081,7 @@ class MapPosterGUI:
         tk.Label(r, text="Distance (m)", bg=C_PANEL, fg=C_TEXT_DIM,
                  font=(FONT_FAMILY, 11), width=14,
                  anchor="w").pack(side=tk.LEFT)
-        FlatScale(r, from_=1000, to=200000, variable=self.var_distance,
+        FlatScale(r, from_=1000, to=1000000, variable=self.var_distance,
                   command=self._on_distance_change,
                   fmt="{:.0f} m").pack(side=tk.LEFT, fill=tk.X, expand=True)
 
@@ -1080,8 +1123,15 @@ class MapPosterGUI:
         tk.Label(r, text="Format", bg=C_PANEL, fg=C_TEXT_DIM,
                  font=(FONT_FAMILY, 11), width=14,
                  anchor="w").pack(side=tk.LEFT)
-        FlatRadio(r, ["png", "svg", "pdf"], self.var_format,
-                  command=self._update_estimates).pack(side=tk.LEFT)
+        FlatCheck(r, text="PNG", variable=self.var_fmt_png,
+                  command=self._on_format_toggle).pack(side=tk.LEFT, padx=(0, 8))
+        FlatCheck(r, text="SVG", variable=self.var_fmt_svg,
+                  command=self._on_format_toggle).pack(side=tk.LEFT, padx=(0, 8))
+        FlatCheck(r, text="PDF", variable=self.var_fmt_pdf,
+                  command=self._on_format_toggle).pack(side=tk.LEFT)
+        tk.Label(body, text="Tick more than one to export several files at once",
+                 bg=C_PANEL, fg=C_TEXT_MUT,
+                 font=(FONT_FAMILY, 9), anchor="w").pack(anchor="w")
 
         self._dpi_str = tk.StringVar(value=str(self.var_dpi.get()))
         self._dpi_str.trace_add("write", lambda *_: self._set_dpi())
@@ -1132,6 +1182,23 @@ class MapPosterGUI:
             pass
         self._update_estimates()
 
+    def _selected_formats(self):
+        """Return the list of export formats the user ticked (>=1, png fallback)."""
+        fmts = []
+        if self.var_fmt_png.get():
+            fmts.append("png")
+        if self.var_fmt_svg.get():
+            fmts.append("svg")
+        if self.var_fmt_pdf.get():
+            fmts.append("pdf")
+        return fmts or ["png"]
+
+    def _on_format_toggle(self):
+        # Keep the legacy single-format var pointed at the primary choice so
+        # estimates, previews and the summary line keep working.
+        self.var_format.set(self._selected_formats()[0])
+        self._update_estimates()
+
     def _build_typography(self, body):
         self._row(body, "Google Font",
                   lambda p: FlatEntry(p, self.var_font_family))
@@ -1143,6 +1210,13 @@ class MapPosterGUI:
             anchor="w").pack(anchor="w")
 
     def _build_advanced(self, body):
+        self._subheader(body, "Display Labels")
+        self._build_labels(body)
+
+        self._subheader(body, "Typography")
+        self._build_typography(body)
+
+        self._subheader(body, "Features")
         FlatCheck(body, text="Water features",
                   variable=self.var_show_water).pack(anchor="w", pady=2)
         FlatCheck(body, text="Parks / green spaces",
@@ -1200,6 +1274,26 @@ class MapPosterGUI:
             prog, textvariable=self.progress_text, bg=C_PANEL,
             fg=C_TEXT_MUT, font=(FONT_FAMILY, 10), padx=8, anchor="w")
         self._prog_status.pack(anchor="w", pady=(0, 6))
+
+        # ---- DATA SOURCE (live tile grid / CDN download status) ---------
+        ds_sec = tk.Frame(parent, bg=C_PANEL)
+        ds_sec.pack(fill=tk.X, padx=8, pady=4)
+        tk.Label(ds_sec, text="DATA SOURCE", bg=C_PANEL, fg=C_TEXT_DIM,
+                 font=(FONT_FAMILY, 10, "bold"), pady=6,
+                 padx=8).pack(anchor="w")
+        tk.Frame(ds_sec, bg=C_BORDER, height=1).pack(fill=tk.X)
+        self._ds_status = tk.Label(
+            ds_sec, text="Idle", bg=C_PANEL, fg=C_TEXT_MUT,
+            font=(FONT_FAMILY, 10), padx=8, anchor="w",
+            wraplength=360, justify="left")
+        self._ds_status.pack(anchor="w", pady=(6, 2))
+        # A grid of small squares, one per map tile, that fill in green as
+        # tiles are loaded into memory (blue while downloading from the CDN).
+        self._ds_grid = tk.Canvas(
+            ds_sec, height=8, bg=C_PANEL, highlightthickness=0, bd=0)
+        self._ds_grid.pack(fill=tk.X, padx=8, pady=(2, 6))
+        self._ds_cells = {}          # (lon_idx, lat_idx) -> rectangle id
+        self._ds_name_to_cell = {}   # tile filename -> (lon_idx, lat_idx)
 
         log_sec = tk.Frame(parent, bg=C_PANEL)
         log_sec.pack(fill=tk.BOTH, expand=True, padx=8, pady=4)
@@ -1547,6 +1641,161 @@ class MapPosterGUI:
         self.log_text.delete("1.0", tk.END)
         self.log_text.config(state=tk.DISABLED)
 
+    # ------------------------------------------------------------------
+    # DATA SOURCE panel (live PBF tile grid / CDN download status)
+    # ------------------------------------------------------------------
+    # Colour of each grid cell per tile status.
+    _GRID_COLORS = {
+        "pending": "#2a2a3a",
+        "local": "#3a6ea5",       # resolved on disk, queued for read
+        "cached": "#3a6ea5",
+        "downloaded": "#3a6ea5",
+        "downloading": "#5aa9e6",  # actively pulling from CDN
+        "reading": "#e6b85a",      # parsing into memory
+        "loaded": "#5cb85c",       # done, in RAM (green)
+        "missing": "#1f1f28",      # not on CDN (ocean)
+        "error": "#e66a6a",
+    }
+
+    def _ds_reset(self, source_label):
+        """Reset the data-source panel for a new generation run."""
+        def _do():
+            self._ds_grid.delete("all")
+            self._ds_cells = {}
+            self._ds_name_to_cell = {}
+            self._ds_grid.config(height=8)
+            self._ds_status.config(text=source_label, fg=C_TEXT_MUT)
+        self.root.after(0, _do)
+
+    def _ds_set_status(self, text, color=None):
+        self.root.after(
+            0, lambda: self._ds_status.config(
+                text=text, fg=color or C_TEXT_MUT))
+
+    def _on_pbf_event(self, event):
+        """Receive a pbf_data progress event (worker thread) and update UI.
+
+        Runs on a pbf worker thread, so it must NOT touch Tkinter directly -
+        cross-thread Tcl calls queue up and only flush once the main thread
+        next enters Tcl, which made the grid look frozen until the load
+        finished. Instead we hand the event to a thread-safe queue that the
+        main thread drains in _pump_pbf_events.
+        """
+        try:
+            self._pbf_event_queue.put_nowait(event)
+        except Exception:  # noqa: BLE001 - never let UI plumbing break a load
+            pass
+
+    def _pump_pbf_events(self):
+        """Drain queued PBF events and apply them on the main thread.
+
+        Reschedules itself on a short interval so each tile turns its grid cell
+        the right colour the moment it is reported, keeping the UI responsive
+        throughout the load instead of repainting only at the end.
+        """
+        applied = False
+        try:
+            while True:
+                event = self._pbf_event_queue.get_nowait()
+                try:
+                    self._ds_apply_event(event)
+                    applied = True
+                except Exception:  # noqa: BLE001 - one bad event must not stop the pump
+                    pass
+        except queue.Empty:
+            pass
+        if applied:
+            # Force the grid to repaint now so each loaded block shows up
+            # immediately rather than on the next idle cycle.
+            try:
+                self._ds_grid.update_idletasks()
+            except Exception:  # noqa: BLE001
+                pass
+        self.root.after(60, self._pump_pbf_events)
+
+    def _ds_apply_event(self, event):
+        etype = event.get("type")
+        if etype == "plan":
+            src = event.get("source")
+            count = event.get("tile_count", 0)
+            if src == "local":
+                txt = f"PBF · local folder · {count} tile(s)"
+                color = "#7ec77e"
+            else:
+                txt = f"PBF · CDN download · {count} tile(s)"
+                color = "#5aa9e6"
+            self._ds_status.config(text=txt, fg=color)
+            self._ds_build_grid(event.get("tiles", []))
+        elif etype == "tile":
+            self._ds_update_tile(event)
+        elif etype == "done":
+            self._ds_status.config(
+                text=(f"Ready · {event.get('roads', 0)} roads, "
+                      f"{event.get('water', 0)} water, "
+                      f"{event.get('parks', 0)} parks"),
+                fg="#7ec77e")
+
+    def _ds_build_grid(self, tiles):
+        """Draw one square per map tile, laid out by lon/lat index."""
+        self._ds_grid.delete("all")
+        self._ds_cells = {}
+        self._ds_name_to_cell = {}
+        if not tiles:
+            self._ds_grid.config(height=8)
+            return
+        lons = [t[0] for t in tiles]
+        lats = [t[1] for t in tiles]
+        lon_min, lon_max = min(lons), max(lons)
+        lat_min, lat_max = min(lats), max(lats)
+        cols = lon_max - lon_min + 1
+        rows = lat_max - lat_min + 1
+        pad = 2
+        avail_w = 344
+        cell = int((avail_w - (cols + 1) * pad) / max(1, cols))
+        cell = max(5, min(26, cell))
+        grid_h = rows * cell + (rows + 1) * pad
+        self._ds_grid.config(height=grid_h)
+        for lo, la, name in tiles:
+            cx = lo - lon_min
+            ry = lat_max - la  # lat increases upward -> top row is max lat
+            x0 = pad + cx * (cell + pad)
+            y0 = pad + ry * (cell + pad)
+            rect = self._ds_grid.create_rectangle(
+                x0, y0, x0 + cell, y0 + cell,
+                fill=self._GRID_COLORS["pending"], outline=C_BORDER, width=1)
+            self._ds_cells[(lo, la)] = rect
+            self._ds_name_to_cell[name] = (lo, la)
+
+    def _ds_color_cell(self, name, status):
+        color = self._GRID_COLORS.get(status)
+        if color is None:
+            return
+        key = self._ds_name_to_cell.get(name)
+        if key is None:
+            return
+        rect = self._ds_cells.get(key)
+        if rect is not None:
+            self._ds_grid.itemconfig(rect, fill=color)
+
+    def _ds_update_tile(self, event):
+        name = event.get("name", "?")
+        status = event.get("status", "")
+        self._ds_color_cell(name, status)
+        if status == "downloading":
+            total = event.get("total", 0) or 0
+            done = event.get("downloaded", 0) or 0
+            short = name.replace(".osm.pbf", "")
+            if total > 0:
+                pct = done / total * 100
+                self._ds_status.config(
+                    text=(f"Downloading {short} · {pct:.0f}% "
+                          f"({_human_bytes(done)}/{_human_bytes(total)})"),
+                    fg="#5aa9e6")
+            else:
+                self._ds_status.config(
+                    text=f"Downloading {short} · {_human_bytes(done)}",
+                    fg="#5aa9e6")
+
     def _selected_theme_names(self):
         if self.var_all_themes.get():
             names = list(self.all_themes.keys())
@@ -1643,7 +1892,7 @@ class MapPosterGUI:
             dist = self.var_distance.get()
             width = self.var_width.get()
             height = self.var_height.get()
-            fmt = self.var_format.get()
+            formats = self._selected_formats()
             dpi = self.var_dpi.get()
             lat = self.var_lat.get().strip()
             lon = self.var_lon.get().strip()
@@ -1687,7 +1936,23 @@ class MapPosterGUI:
             # the same city/distance.
             compensated_dist = (
                 dist * (max(height, width) / min(height, width)) / 4)
-            self._set_progress(8, "Fetching map elements (cache + Overpass)...")
+            data_source = DATA_SOURCE_LABELS.get(
+                self.var_data_source.get(), "pbf")
+            src_name = ("PBF tiles" if data_source == "pbf"
+                        else "OSM API (Overpass)")
+            self._set_progress(
+                8, f"Fetching map elements via {src_name}...")
+
+            # Reset and wire the live DATA SOURCE panel.
+            import pbf_data
+            if data_source == "pbf":
+                self._ds_reset("PBF · resolving tiles…")
+                self._ds_set_status("PBF · resolving tiles…", "#5aa9e6")
+                pbf_data.set_progress_callback(self._on_pbf_event)
+            else:
+                self._ds_reset("OSM API · Overpass (live)…")
+                pbf_data.set_progress_callback(None)
+                self._ds_set_status("OSM API · Overpass (live)…", "#e6b85a")
 
             # Pipe prefetch stdout into the GUI log so transient Overpass
             # errors, retries, and timing are visible in the UI (not just
@@ -1716,37 +1981,45 @@ class MapPosterGUI:
                     self._buf = ""
 
             log_stream = _LogStream(self._log)
-            with contextlib.redirect_stdout(log_stream):
-                elements = cmp.prefetch_map_elements(
-                    coords, compensated_dist)
-            log_stream.flush()
+            try:
+                with contextlib.redirect_stdout(log_stream):
+                    # Only pay for the polygon (water/parks) layer when the
+                    # user actually wants area features drawn. By default they
+                    # are off, so large maps skip it entirely.
+                    want_polygons = show_water or show_parks
+                    elements = cmp.prefetch_map_elements(
+                        coords, compensated_dist, source=data_source,
+                        include_polygons=want_polygons)
+            finally:
+                log_stream.flush()
+                pbf_data.set_progress_callback(None)
+                if data_source != "pbf":
+                    self._ds_set_status("OSM API · done", "#7ec77e")
 
-            g = elements["graph"]
+            roads = elements["roads"]
             water_data = elements["water"] if show_water else None
             parks_data = elements["parks"] if show_parks else None
             coastline_data = elements["coastline"] if show_coastline else None
-            if g is None:
+            if roads is None or len(roads) == 0:
                 self._log(
                     "FAIL: Failed to fetch street network "
-                    f"(radius={compensated_dist:.0f}m, point={coords}). "
-                    "See lines above for Overpass error.")
+                    f"(radius={compensated_dist:.0f}m, point={coords}, "
+                    f"source={data_source}). See lines above for details.")
                 return generated_posters
             self._log("OK: Map elements ready (shared across all themes)")
 
-            # Project the graph once — this is the expensive CPU step and the
-            # result is theme-independent.
-            import osmnx as ox
-            self._set_progress(10, "Projecting graph...")
-            g_proj = ox.project_graph(g)
+            # Project the roads GDF once to a metric CRS (auto UTM) — this is
+            # the expensive CPU step and the result is theme-independent.
+            self._set_progress(10, "Projecting map data...")
+            roads_proj = cmp.project_to_crs(roads)
+            map_crs = roads_proj.crs
 
-            # Pre-project feature GDFs once as well; theme only affects color.
+            # Pre-project feature GDFs into the same CRS once; theme only
+            # affects colour, never geometry.
             def _project_gdf(gdf):
-                if gdf is None or gdf.empty:
+                if gdf is None or len(gdf) == 0:
                     return gdf
-                try:
-                    return ox.projection.project_gdf(gdf)
-                except Exception:
-                    return gdf.to_crs(g_proj.graph['crs'])
+                return cmp.project_to_crs(gdf, map_crs)
 
             water_proj = (
                 _project_gdf(
@@ -1788,26 +2061,27 @@ class MapPosterGUI:
                             f"Warning: Failed to load "
                             f"'{font_family}', using default")
 
-                if (output_dir and
-                        output_dir != os.path.abspath(POSTERS_DIR)):
-                    os.makedirs(output_dir, exist_ok=True)
+                # Build a path for one export format. Called once per ticked
+                # format so a single render can be saved as several files.
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                slug = city.lower().replace(" ", "_")
+
+                def _make_out(ext):
                     if custom_filename:
-                        out_file = os.path.join(
-                            output_dir, custom_filename)
-                    else:
-                        ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-                        slug = city.lower().replace(" ", "_")
-                        out_file = os.path.join(
-                            output_dir,
-                            f"{slug}_{t_name}_{ts}.{fmt}")
-                else:
-                    if custom_filename:
+                        stem = os.path.splitext(custom_filename)[0]
+                        name = f"{stem}.{ext}"
+                        if (output_dir and output_dir
+                                != os.path.abspath(POSTERS_DIR)):
+                            os.makedirs(output_dir, exist_ok=True)
+                            return os.path.join(output_dir, name)
                         os.makedirs(POSTERS_DIR, exist_ok=True)
-                        out_file = os.path.join(
-                            POSTERS_DIR, custom_filename)
-                    else:
-                        out_file = cmp.generate_output_filename(
-                            city, t_name, fmt)
+                        return os.path.join(POSTERS_DIR, name)
+                    if (output_dir and output_dir
+                            != os.path.abspath(POSTERS_DIR)):
+                        os.makedirs(output_dir, exist_ok=True)
+                        return os.path.join(
+                            output_dir, f"{slug}_{t_name}_{ts}.{ext}")
+                    return cmp.generate_output_filename(city, t_name, ext)
 
                 if self._cancel_event.is_set():
                     self._log("Cancelled.")
@@ -1846,13 +2120,13 @@ class MapPosterGUI:
                         ax=ax,
                         edgecolor=coast_color,
                         facecolor='none',
-                        linewidth=2.0, zorder=1.5)
+                        linewidth=0.5, alpha=0.6, zorder=1.5)
 
                 self._set_progress(base + 50, "Drawing roads...")
                 crop_xlim, crop_ylim = cmp.get_crop_limits(
-                    g_proj, coords, fig, compensated_dist)
+                    map_crs, coords, fig, compensated_dist)
                 cmp.plot_roads_layered(
-                    g_proj, ax, compensated_dist,
+                    roads_proj, ax, compensated_dist,
                     road_width_mult=road_mult)
                 ax.set_aspect("auto")
                 ax.set_xlim(crop_xlim)
@@ -1942,8 +2216,6 @@ class MapPosterGUI:
                         ha="right", va="bottom",
                         fontproperties=font_attr, zorder=11)
 
-                self._set_progress(
-                    base + 70, f"Saving {fmt.upper()}...")
                 # Turn off all axis decorations so tick marks and labels
                 # never appear in the exported image.
                 ax.axis("off")
@@ -1954,22 +2226,29 @@ class MapPosterGUI:
                 for spine in ax.spines.values():
                     spine.set_visible(False)
                 fig.subplots_adjust(left=0, right=1, top=1, bottom=0)
-                save_kw = dict(
-                    facecolor=cmp.THEME["bg"],
-                    bbox_inches=None,
-                    pad_inches=0)
-                if fmt == "png":
-                    save_kw["dpi"] = dpi
-                os.makedirs(os.path.dirname(out_file), exist_ok=True)
-                plt.savefig(out_file, format=fmt, **save_kw)
-                plt.close(fig)
 
-                self.last_output_file = out_file
-                generated_posters += 1
-                self._log(f"OK: Saved: {out_file}")
-                self.root.after(
-                    0, self._add_history, city, country,
-                    t_name, out_file)
+                # Save the single rendered figure once per ticked format.
+                for fmt in formats:
+                    self._set_progress(
+                        base + 70, f"Saving {fmt.upper()}...")
+                    out_file = _make_out(fmt)
+                    save_kw = dict(
+                        facecolor=cmp.THEME["bg"],
+                        bbox_inches=None,
+                        pad_inches=0)
+                    if fmt == "png":
+                        save_kw["dpi"] = dpi
+                    out_dir = os.path.dirname(out_file)
+                    if out_dir:
+                        os.makedirs(out_dir, exist_ok=True)
+                    plt.savefig(out_file, format=fmt, **save_kw)
+                    self.last_output_file = out_file
+                    generated_posters += 1
+                    self._log(f"OK: Saved: {out_file}")
+                    self.root.after(
+                        0, self._add_history, city, country,
+                        t_name, out_file)
+                plt.close(fig)
 
             self._set_progress(100, "Done!")
             self._log("\nGeneration complete!")
@@ -2211,6 +2490,10 @@ class MapPosterGUI:
             ("bg_override", self.var_bg_override),
             ("text_override", self.var_text_override),
             ("border_size", self.var_border_size),
+            ("data_source", self.var_data_source),
+            ("fmt_png", self.var_fmt_png),
+            ("fmt_svg", self.var_fmt_svg),
+            ("fmt_pdf", self.var_fmt_pdf),
         ]}
 
     def _apply_settings(self, s):
@@ -2219,7 +2502,7 @@ class MapPosterGUI:
             "longitude", "display_city", "display_country",
             "country_label", "font_family", "output_dir",
             "custom_filename", "orientation",
-            "bg_override", "text_override"]
+            "bg_override", "text_override", "data_source"]
         for k in str_keys:
             if k in s:
                 getattr(self, f"var_{k}").set(s[k])
@@ -2230,7 +2513,8 @@ class MapPosterGUI:
             if k in s:
                 getattr(self, f"var_{k}").set(float(s[k]))
         for k in ["all_themes", "dark_themes", "light_themes", "risk_themes", "show_water", "show_parks",
-                   "show_coastline", "show_gradient", "show_attribution", "show_typography"]:
+                   "show_coastline", "show_gradient", "show_attribution", "show_typography",
+                   "fmt_png", "fmt_svg", "fmt_pdf"]:
             if k in s:
                 getattr(self, f"var_{k}").set(bool(s[k]))
         self._draw_theme_preview()
@@ -2372,6 +2656,7 @@ class MapPosterGUI:
             "bg_override", "text_override",
             "all_themes", "dark_themes", "light_themes", "risk_themes",
             "theme", "output_dir",
+            "data_source", "fmt_png", "fmt_svg", "fmt_pdf",
         ]
         batch_snapshot = {
             name: getattr(self, f"var_{name}").get()

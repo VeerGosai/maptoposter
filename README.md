@@ -1,11 +1,32 @@
-# Use RUN.MD To Start GUI
-
 # City Map Poster Generator
 
 Generate beautiful, minimalist map posters for any city in the world.
 
 <img src="posters/singapore_neon_cyberpunk_20260118_153328.png" width="250">
 <img src="posters/dubai_midnight_blue_20260118_140807.png" width="250">
+
+## 🚀 One-Click Start (GUI)
+
+Copy and paste the single command for your OS into a terminal opened in this
+project folder. It creates a fresh virtual environment, installs every
+dependency, and launches the GUI.
+
+### macOS / Linux
+
+```bash
+python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && python gui_mode.py
+```
+
+### Windows (PowerShell)
+
+```powershell
+python -m venv venv; .\venv\Scripts\Activate.ps1; pip install -r requirements.txt; python gui_mode.py
+```
+
+> After the first run, start the GUI again any time with
+> `source venv/bin/activate && python gui_mode.py` (macOS/Linux) or
+> `.\venv\Scripts\Activate.ps1; python gui_mode.py` (Windows).
+
 
 ## Examples
 
@@ -74,6 +95,7 @@ python create_map_poster.py --city <city> --country <country> [options]
 |--------|-------|-------------|---------|
 | **OPTIONAL:** `--latitude` | `-lat` | Override latitude center point (use with --longitude) | |
 | **OPTIONAL:** `--longitude` | `-long` | Override longitude center point (use with --latitude) | |
+| **OPTIONAL:** `--data-source` | `-ds` | Where road data comes from: `pbf` (offline tiles) or `api` (live Overpass) | pbf |
 | **OPTIONAL:** `--country-label` | | Override country text displayed on poster | |
 | **OPTIONAL:** `--theme` | `-t` | Theme name | terracotta |
 | **OPTIONAL:** `--distance` | `-d` | Map radius in meters | 18000 |
@@ -81,6 +103,29 @@ python create_map_poster.py --city <city> --country <country> [options]
 | **OPTIONAL:** `--all-themes` | | Generate posters for all available themes | |
 | **OPTIONAL:** `--width` | `-W` | Image width in inches | 12 (max: 20) |
 | **OPTIONAL:** `--height` | `-H` | Image height in inches | 16 (max: 20) |
+
+### Data Sources
+
+Road, water and park data can come from two places, selected with `--data-source`
+(or the **Data Source** toggle in the GUI):
+
+- **`pbf` (default)** — Reads pre-cut 1°×1° OpenStreetMap extracts (`lon{X}_lat{Y}.osm.pbf`).
+  If a `1/` folder with the tiles exists next to the script it is used directly;
+  otherwise the needed tiles are downloaded on demand from the CDN
+  (`https://gis.veergosai.com/1/<tile>`) and cached under `cache/pbf_tiles/`.
+  This is fast and works offline once tiles are cached, and never hits Overpass
+  rate limits. Tiles over the ocean / not yet uploaded simply return no data (404).
+- **`api`** — Fetches live data from the OpenStreetMap Overpass API via `osmnx`.
+  Always up to date, but slower and subject to Overpass rate limits.
+
+Override the defaults with environment variables:
+
+| Variable | Purpose | Default |
+|----------|---------|---------|
+| `DATA_SOURCE` | Default source when no flag is given (`pbf` / `api`) | `pbf` |
+| `PBF_DIR` | Local tile folder | `1` |
+| `PBF_CDN` | Base URL for downloading tiles | `https://gis.veergosai.com/1` |
+
 
 ### Multilingual Support - i18n
 
