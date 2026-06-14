@@ -416,15 +416,16 @@ _ROAD_TIERS = [
 
 def _minor_road_scale(dist):
     """Width multiplier for minor roads at large map extents.
-    Fades from 1.0 at <=100 km to 0.15 at 200 km."""
-    if dist <= 100_000:
+    Keeps full detail through 200 km, then gradually thins minor roads.
+    Fades from 1.0 at <=200 km to 0.15 at 400 km."""
+    if dist <= 200_000:
         return 1.0
-    return max(0.15, 1.0 - (dist - 100_000) / 117_647)
+    return max(0.15, 1.0 - (dist - 200_000) / 235_294)
 
 
 def plot_roads_layered(edges_gdf, ax, dist, road_width_mult=1.0):
     """Draw roads in hierarchical passes so major roads always render on top.
-    Minor roads are progressively thinned at distances > 100 km.
+    Minor roads are progressively thinned only at distances > 200 km.
 
     ``edges_gdf`` is a (projected) GeoDataFrame of road geometries with a
     ``highway`` column. Both the live-API path and the offline PBF path feed
@@ -641,17 +642,17 @@ def _fetch_graph_api(point, dist) -> MultiDiGraph | None:
 
     Graduated detail level so we don't ask Overpass for a query it will refuse:
       - <= 30 km radius: every way (network_type='all', footways/cycleways/service).
-      - 30 km – 150 km: all drivable roads (network_type='drive'); includes
+            - 30 km - 200 km: all drivable roads (network_type='drive'); includes
         residential/unclassified streets but skips footways/service alleys.
         This is what gives "detailed" 200 km posters their street texture.
-      - > 150 km: trunk/primary/secondary/tertiary only (the bbox is huge at
+            - > 200 km: trunk/primary/secondary/tertiary only (the bbox is huge at
         that point and Overpass will refuse anything denser).
     """
     if dist <= 30_000:
         return ox.graph_from_point(
             point, dist=dist, dist_type='bbox',
             network_type='all', truncate_by_edge=True)
-    if dist <= 150_000:
+    if dist <= 200_000:
         return ox.graph_from_point(
             point, dist=dist, dist_type='bbox',
             network_type='drive', truncate_by_edge=True)

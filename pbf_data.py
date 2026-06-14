@@ -120,13 +120,13 @@ def _lines_where_for_dist(dist):
     Mirrors the live-API path's graduated detail levels so large-extent posters
     stay fast and legible instead of drowning in footpaths:
       - <= 30 km : every highway (full street texture).
-      - 30-150 km: drivable roads only.
-      - > 150 km : major roads only (motorway..tertiary).
+      - 30-200 km: drivable roads only.
+      - > 200 km : major roads only (motorway..tertiary).
     Coastline ways are always included regardless of distance.
     """
     if dist <= 30_000:
         roads = "highway IS NOT NULL"
-    elif dist <= 150_000:
+    elif dist <= 200_000:
         roads = _DRIVE_HW_WHERE
     else:
         roads = _MAJOR_HW_WHERE
@@ -146,7 +146,7 @@ _PARK_LANDUSE = ("grass", "forest", "meadow", "recreation_ground")
 _COAST_MARKER = '"natural"=>"coastline"'
 
 # At very large extents the small parks/grass patches are invisible anyway and
-# only add millions of features (and broken-geometry hits). Beyond 150 km we
+# only add millions of features (and broken-geometry hits). Beyond 200 km we
 # keep just significant water bodies and forests.
 _POLYS_WHERE_MAJOR = (
     "natural IN ('water', 'bay', 'strait') "
@@ -158,11 +158,11 @@ _POLYS_WHERE_MAJOR = (
 def _polys_where_for_dist(dist):
     """Distance-graduated WHERE clause for the 'multipolygons' layer.
 
-    Mirrors the road filter: full water+parks detail up to 150 km, then only
+    Mirrors the road filter: full water+parks detail up to 200 km, then only
     major water bodies and forests for very large extents so the read stays
     fast and the poster stays legible.
     """
-    if dist <= 150_000:
+    if dist <= 200_000:
         return _POLYS_WHERE
     return _POLYS_WHERE_MAJOR
 
