@@ -75,14 +75,15 @@ _PBF_WORKERS = max(
 # sit just either side of a tile boundary so roads stay continuous in the
 # export. Tuned via env vars; set PBF_STITCH=0 to disable entirely.
 #   _SEAM_TOL_DEG    : how far (deg) from the boundary an endpoint may sit to
-#                      be considered for bridging (~0.0015 deg ~= 165 m).
+#                      be considered for bridging (~0.0020 deg ~= 220 m).
 #   _SEAM_BRIDGE_DEG : maximum length (deg) of a bridge connector; longer
-#                      candidate pairs are left untouched to avoid wrong joins.
+#                      candidate pairs are left untouched to avoid wrong joins
+#                      (~0.0025 deg ~= 275 m).
 _SEAM_ENABLED = os.environ.get("PBF_STITCH", "1").strip().lower() not in (
     "0", "false", "no", "off",
 )
-_SEAM_TOL_DEG = float(os.environ.get("PBF_SEAM_TOL", "0.0015"))
-_SEAM_BRIDGE_DEG = float(os.environ.get("PBF_SEAM_BRIDGE", "0.0015"))
+_SEAM_TOL_DEG = float(os.environ.get("PBF_SEAM_TOL", "0.0020"))
+_SEAM_BRIDGE_DEG = float(os.environ.get("PBF_SEAM_BRIDGE", "0.0025"))
 
 # Approx. metres per degree of latitude (good enough for tile selection).
 _M_PER_DEG = 111_320.0
@@ -450,11 +451,9 @@ def _stitch_tile_seams(roads, bbox):
 
     A road crossing a degree line is loaded as two LineStrings with a small gap
     where the straddling segment was dropped by the tile clip. For every tile
-    boundary inside ``bbox`` we pair each road endpoint just on one side with
-    its mutually-nearest endpoint just on the other side (within a small
-    distance) and add a short bridging LineString so the road renders as one
-    continuous line. Mutual nearest-neighbour matching plus a tight distance
-    cap keeps it from joining unrelated dead-ends.
+    boundary inside ``bbox`` we pair endpoints on opposite sides using a
+    shortest-first greedy matcher with a tight distance cap and road-class
+    compatibility. This bridges true splits while avoiding unrelated joins.
 
     Returns ``roads`` unchanged if stitching is disabled, scipy is unavailable,
     there are no interior boundaries, or nothing needs bridging.
@@ -479,6 +478,25 @@ def _stitch_tile_seams(roads, bbox):
         return roads
     highways = roads["highway"].to_numpy()
 
+    def _norm_hw(val):
+        if isinstance(val, list):
+            return val[0] if val else ""
+        return str(val or "")
+
+    def _hw_class(val):
+        hw = _norm_hw(val)
+        if hw.endswith("_link"):
+            hw = hw[:-5]
+        if hw in {"motorway", "trunk", "primary", "secondary", "tertiary"}:
+            return hw
+        if hw in {"footway", "path", "cycleway", "bridleway", "steps", "pedestrian"}:
+            return "path"
+        if hw in {"residential", "living_street", "unclassified", "service", "road", "track"}:
+            return "local_drive"
+        return hw or "local_other"
+
+    hw_classes = np.array([_hw_class(v) for v in highways], dtype=object)
+
     # Longitude degrees are shorter than latitude degrees away from the
     # equator; scale x so the nearest-neighbour match is roughly isotropic.
     mean_lat = (min_lat + max_lat) / 2.0
@@ -492,26 +510,55 @@ def _stitch_tile_seams(roads, bbox):
         tol = _SEAM_TOL_DEG
         side_a = np.where((coord >= line - tol) & (coord < line) & ~used)[0]
         side_b = np.where((coord >= line) & (coord <= line + tol) & ~used)[0]
+
+        def _pick_one_endpoint_per_geom(side_idx):
+            if len(side_idx) <= 1:
+                return side_idx
+            # Keep only the endpoint closest to the seam for each geometry.
+            order = np.argsort(np.abs(coord[side_idx] - line))
+            chosen = []
+            seen_geom = set()
+            for pos in order:
+                idx = int(side_idx[pos])
+                g = int(geom_pos[idx])
+                if g in seen_geom:
+                    continue
+                seen_geom.add(g)
+                chosen.append(idx)
+            return np.array(chosen, dtype=int)
+
+        side_a = _pick_one_endpoint_per_geom(side_a)
+        side_b = _pick_one_endpoint_per_geom(side_b)
+
         if len(side_a) == 0 or len(side_b) == 0:
             return
         scale = np.array([cos_lat, 1.0])
         a_xy = pts[side_a] * scale
         b_xy = pts[side_b] * scale
-        tree_a = cKDTree(a_xy)
         tree_b = cKDTree(b_xy)
-        dab, nb = tree_b.query(a_xy, k=1)   # nearest B for each A
-        _dba, na = tree_a.query(b_xy, k=1)  # nearest A for each B
-        for ia in range(len(side_a)):
-            jb = int(nb[ia])
-            if dab[ia] > _SEAM_BRIDGE_DEG:
+        candidates = []
+
+        for ia, gi in enumerate(side_a):
+            near = tree_b.query_ball_point(a_xy[ia], r=_SEAM_BRIDGE_DEG)
+            if not near:
                 continue
-            if int(na[jb]) != ia:            # require mutual nearest neighbour
-                continue
+            for jb in near:
+                gj = side_b[jb]
+                if geom_pos[gi] == geom_pos[gj]:
+                    continue
+                if hw_classes[geom_pos[gi]] != hw_classes[geom_pos[gj]]:
+                    continue
+                dist = float(np.linalg.norm(a_xy[ia] - b_xy[jb]))
+                candidates.append((dist, ia, jb))
+
+        if not candidates:
+            return
+
+        candidates.sort(key=lambda x: x[0])
+        for _dist, ia, jb in candidates:
             gi = side_a[ia]
             gj = side_b[jb]
             if used[gi] or used[gj]:
-                continue
-            if geom_pos[gi] == geom_pos[gj]:  # never connect a road to itself
                 continue
             used[gi] = True
             used[gj] = True
