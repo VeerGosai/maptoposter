@@ -1,0 +1,15 @@
+{
+  "name": "Light Slate",
+  "description": "Pure white canvas with slate roads - architectural blueprint-lite mood",
+  "bg": "#FFFFFF",
+  "text": "#374151",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#94A3B8",
+  "road_primary": "#64748B",
+  "road_secondary": "#475569",
+  "road_tertiary": "#334155",
+  "road_residential": "#1F2937",
+  "road_default": "#334155"
+}

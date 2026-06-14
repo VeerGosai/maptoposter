@@ -1,0 +1,16 @@
+{
+  "name": "Dark Crimson",
+  "description": "Pure black canvas with crimson roads - dramatic city-at-midnight tone",
+  "bg": "#000000",
+  "text": "#FF4D6D",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#FF4D6D",
+  "parks": "#080808",
+  "road_motorway": "#FF6B81",
+  "road_primary": "#E63B5D",
+  "road_secondary": "#B61F45",
+  "road_tertiary": "#851733",
+  "road_residential": "#571023",
+  "road_default": "#851733"
+}

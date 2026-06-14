@@ -1,0 +1,15 @@
+{
+  "name": "Light Rose",
+  "description": "Pure white canvas with rose roads - romantic but clean contrast",
+  "bg": "#FFFFFF",
+  "text": "#8E2A5A",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#F48FB1",
+  "road_primary": "#F06292",
+  "road_secondary": "#EC407A",
+  "road_tertiary": "#D81B60",
+  "road_residential": "#9C1244",
+  "road_default": "#D81B60"
+}

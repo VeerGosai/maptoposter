@@ -1,0 +1,15 @@
+{
+  "name": "Light Amber",
+  "description": "Pure white canvas with amber roads - editorial warmth and clarity",
+  "bg": "#FFFFFF",
+  "text": "#7A4A00",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FFA726",
+  "road_primary": "#FB8C00",
+  "road_secondary": "#EF6C00",
+  "road_tertiary": "#C65A00",
+  "road_residential": "#8E3E00",
+  "road_default": "#C65A00"
+}

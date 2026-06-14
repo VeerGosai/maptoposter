@@ -1,0 +1,15 @@
+{
+  "name": "Light Teal",
+  "description": "Pure white canvas with teal roads - crisp modern transit-map style",
+  "bg": "#FFFFFF",
+  "text": "#00695C",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#26A69A",
+  "road_primary": "#00897B",
+  "road_secondary": "#00796B",
+  "road_tertiary": "#00695C",
+  "road_residential": "#004D40",
+  "road_default": "#00695C"
+}

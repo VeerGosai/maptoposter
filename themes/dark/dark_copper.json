@@ -1,0 +1,16 @@
+{
+  "name": "Dark Copper",
+  "description": "Pure black canvas with copper roads - industrial premium contrast",
+  "bg": "#000000",
+  "text": "#E6A15A",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#E6A15A",
+  "parks": "#080808",
+  "road_motorway": "#F5B56E",
+  "road_primary": "#D98B42",
+  "road_secondary": "#B96D2F",
+  "road_tertiary": "#8E5222",
+  "road_residential": "#603716",
+  "road_default": "#8E5222"
+}

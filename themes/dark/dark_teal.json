@@ -1,0 +1,16 @@
+{
+  "name": "Dark Teal",
+  "description": "Pure black canvas with teal roads - deep ocean tech aesthetic",
+  "bg": "#000000",
+  "text": "#33E0C2",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#33E0C2",
+  "parks": "#080808",
+  "road_motorway": "#59F0D7",
+  "road_primary": "#20C2A8",
+  "road_secondary": "#178F7C",
+  "road_tertiary": "#10665A",
+  "road_residential": "#0A433B",
+  "road_default": "#10665A"
+}

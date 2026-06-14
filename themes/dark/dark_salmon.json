@@ -1,0 +1,16 @@
+{
+  "name": "Dark Salmon",
+  "description": "Pure black canvas with salmon roads - warm cinematic neon",
+  "bg": "#000000",
+  "text": "#FF8A80",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#FF8A80",
+  "parks": "#080808",
+  "road_motorway": "#FFAB91",
+  "road_primary": "#FF8A65",
+  "road_secondary": "#E06A4D",
+  "road_tertiary": "#B84D37",
+  "road_residential": "#7A3325",
+  "road_default": "#B84D37"
+}

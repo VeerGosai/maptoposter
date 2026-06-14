@@ -658,6 +658,15 @@ class MapPosterGUI:
         self.root.configure(bg=C_BG)
 
         self.all_themes = _load_all_themes()
+        self.dark_theme_count = sum(
+            1 for name in self.all_themes if name.startswith("dark/")
+        )
+        self.light_theme_count = sum(
+            1 for name in self.all_themes if name.startswith("light/")
+        )
+        self.risk_theme_count = sum(
+            1 for name in self.all_themes if name.startswith("risk/")
+        )
         self.generation_history = []
         self.last_output_file = None
         self.is_generating = False
@@ -1015,16 +1024,16 @@ class MapPosterGUI:
             p, self.var_theme, list(self.all_themes.keys()),
             command=self._draw_theme_preview, width=24))
 
-        FlatCheck(body, text="Generate ALL themes",
+        FlatCheck(body, text=f"Generate ALL themes ({len(self.all_themes)})",
                   variable=self.var_all_themes).pack(anchor="w", pady=(4, 1))
 
         row_bulk = tk.Frame(body, bg=C_PANEL)
         row_bulk.pack(anchor="w", fill=tk.X, pady=(0, 4))
-        FlatCheck(row_bulk, text="Generate 10 Dark",
+        FlatCheck(row_bulk, text=f"Generate Dark ({self.dark_theme_count})",
                   variable=self.var_dark_themes).pack(side=tk.LEFT, padx=(0, 12))
-        FlatCheck(row_bulk, text="Generate 10 Light",
+        FlatCheck(row_bulk, text=f"Generate Light ({self.light_theme_count})",
                   variable=self.var_light_themes).pack(side=tk.LEFT, padx=(0, 12))
-        FlatCheck(row_bulk, text="Generate Risk",
+        FlatCheck(row_bulk, text=f"Generate Risk ({self.risk_theme_count})",
                   variable=self.var_risk_themes).pack(side=tk.LEFT)
 
         self.lbl_theme_desc = tk.Label(

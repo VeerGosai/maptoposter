@@ -1,0 +1,16 @@
+{
+  "name": "Dark Lime",
+  "description": "Pure black canvas with electric lime roads - high-voltage contrast",
+  "bg": "#000000",
+  "text": "#C8FF4D",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#C8FF4D",
+  "parks": "#080808",
+  "road_motorway": "#DBFF66",
+  "road_primary": "#B6E63B",
+  "road_secondary": "#8FB61F",
+  "road_tertiary": "#678517",
+  "road_residential": "#445710",
+  "road_default": "#678517"
+}

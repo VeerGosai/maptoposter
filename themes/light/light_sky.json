@@ -1,0 +1,15 @@
+{
+  "name": "Light Sky",
+  "description": "Pure white canvas with sky blue roads - bright coastal minimal",
+  "bg": "#FFFFFF",
+  "text": "#0D47A1",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#64B5F6",
+  "road_primary": "#42A5F5",
+  "road_secondary": "#1E88E5",
+  "road_tertiary": "#1565C0",
+  "road_residential": "#0D47A1",
+  "road_default": "#1565C0"
+}

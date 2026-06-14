@@ -1,0 +1,16 @@
+{
+  "name": "Dark Mint",
+  "description": "Pure black canvas with mint roads - clean futuristic glow",
+  "bg": "#000000",
+  "text": "#4DFFB3",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#4DFFB3",
+  "parks": "#080808",
+  "road_motorway": "#66FFC2",
+  "road_primary": "#2DDB9A",
+  "road_secondary": "#1EA774",
+  "road_tertiary": "#15704F",
+  "road_residential": "#0D4A34",
+  "road_default": "#15704F"
+}

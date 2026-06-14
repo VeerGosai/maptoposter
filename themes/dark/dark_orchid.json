@@ -1,0 +1,16 @@
+{
+  "name": "Dark Orchid",
+  "description": "Pure black canvas with orchid roads - synthwave luxury mood",
+  "bg": "#000000",
+  "text": "#C77DFF",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#C77DFF",
+  "parks": "#080808",
+  "road_motorway": "#D9A6FF",
+  "road_primary": "#B866FF",
+  "road_secondary": "#8F3FD4",
+  "road_tertiary": "#662B99",
+  "road_residential": "#452066",
+  "road_default": "#662B99"
+}

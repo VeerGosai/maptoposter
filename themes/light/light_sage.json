@@ -1,0 +1,15 @@
+{
+  "name": "Light Sage",
+  "description": "Pure white canvas with sage roads - natural calm modern look",
+  "bg": "#FFFFFF",
+  "text": "#355E3B",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#8AB17D",
+  "road_primary": "#6D9F71",
+  "road_secondary": "#5A8C60",
+  "road_tertiary": "#48734E",
+  "road_residential": "#35583B",
+  "road_default": "#48734E"
+}

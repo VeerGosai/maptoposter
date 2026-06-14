@@ -1,0 +1,15 @@
+{
+  "name": "Light Peach",
+  "description": "Pure white canvas with peach roads - warm gallery-print style",
+  "bg": "#FFFFFF",
+  "text": "#9A4E2E",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FFB58A",
+  "road_primary": "#FF9E6D",
+  "road_secondary": "#F98658",
+  "road_tertiary": "#D86F44",
+  "road_residential": "#A85733",
+  "road_default": "#D86F44"
+}

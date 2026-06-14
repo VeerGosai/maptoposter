@@ -1,0 +1,16 @@
+{
+  "name": "Dark Periwinkle",
+  "description": "Pure black canvas with periwinkle roads - nocturnal skyline palette",
+  "bg": "#000000",
+  "text": "#9AB3FF",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#9AB3FF",
+  "parks": "#080808",
+  "road_motorway": "#B7C8FF",
+  "road_primary": "#7F9DFF",
+  "road_secondary": "#5A77D6",
+  "road_tertiary": "#3F56A0",
+  "road_residential": "#2B3A6E",
+  "road_default": "#3F56A0"
+}

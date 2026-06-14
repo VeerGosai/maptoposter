@@ -1,0 +1,16 @@
+{
+  "name": "Dark Aqua",
+  "description": "Pure black canvas with aqua roads - bioluminescent reef vibe",
+  "bg": "#000000",
+  "text": "#40E0D0",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#40E0D0",
+  "parks": "#080808",
+  "road_motorway": "#66FFF1",
+  "road_primary": "#22CFC0",
+  "road_secondary": "#159E92",
+  "road_tertiary": "#0D6E66",
+  "road_residential": "#094842",
+  "road_default": "#0D6E66"
+}

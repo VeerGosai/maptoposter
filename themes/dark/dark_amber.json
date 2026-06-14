@@ -1,0 +1,16 @@
+{
+  "name": "Dark Amber",
+  "description": "Pure black canvas with amber roads - warm neon night glow",
+  "bg": "#000000",
+  "text": "#FFBF47",
+  "gradient_color": "#000000",
+  "water": "#000000",
+  "coastline": "#FFBF47",
+  "parks": "#080808",
+  "road_motorway": "#FFD166",
+  "road_primary": "#F4A300",
+  "road_secondary": "#C97A00",
+  "road_tertiary": "#8A5200",
+  "road_residential": "#5A3500",
+  "road_default": "#8A5200"
+}

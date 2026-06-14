@@ -1,0 +1,15 @@
+{
+  "name": "Light Lavender",
+  "description": "Pure white canvas with lavender roads - airy boutique elegance",
+  "bg": "#FFFFFF",
+  "text": "#5E35B1",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#9575CD",
+  "road_primary": "#7E57C2",
+  "road_secondary": "#673AB7",
+  "road_tertiary": "#512DA8",
+  "road_residential": "#311B92",
+  "road_default": "#512DA8"
+}

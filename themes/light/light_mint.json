@@ -1,0 +1,15 @@
+{
+  "name": "Light Mint",
+  "description": "Pure white canvas with mint roads - fresh and contemporary minimal",
+  "bg": "#FFFFFF",
+  "text": "#2E7D6B",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#6EE7B7",
+  "road_primary": "#34D399",
+  "road_secondary": "#10B981",
+  "road_tertiary": "#0E9F6E",
+  "road_residential": "#0B6F4D",
+  "road_default": "#0E9F6E"
+}

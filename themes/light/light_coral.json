@@ -1,0 +1,15 @@
+{
+  "name": "Light Coral",
+  "description": "Pure white canvas with coral roads - soft modern sunset energy",
+  "bg": "#FFFFFF",
+  "text": "#B23C2F",
+  "gradient_color": "#FFFFFF",
+  "water": "#FFFFFF",
+  "parks": "#F5F5F5",
+  "road_motorway": "#FF8A65",
+  "road_primary": "#FF7043",
+  "road_secondary": "#F4511E",
+  "road_tertiary": "#D84315",
+  "road_residential": "#8D2F0F",
+  "road_default": "#D84315"
+}
