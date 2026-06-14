@@ -5,6 +5,7 @@ env/
 .env/
 .venv/
 venv/
+1/
 
 # Build artifacts
 *.egg-info/
@@ -38,3 +39,7 @@ posters/
 TEMP/
 TEMP
 posters
+posters.zip
+n22222222/
+fonts/
+cache/

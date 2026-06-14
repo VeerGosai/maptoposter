@@ -50,6 +50,25 @@ FILE_ENCODING = "utf-8"
 
 FONTS = load_fonts("Poppins")
 
+# Overpass mirrors. The primary (overpass-api.de) frequently rate-limits or
+# refuses connections from residential IPs; the mirrors are run by the OSM
+# community and usually pick up the slack. They expose the same query API.
+OVERPASS_ENDPOINTS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://maps.mail.ru/osm/tools/overpass/api/interpreter",
+]
+
+
+def _set_overpass_endpoint(url: str) -> None:
+    """Best-effort switch of the active Overpass endpoint (thread-global)."""
+    try:
+        ox.settings.overpass_url = url
+    except Exception:
+        pass
+
+
 # OSMnx tuning: enable on-disk cache, generous timeout, and don't pause between
 # requests (we serialize our own retries with backoff and parallelize misses).
 try:
@@ -533,8 +552,9 @@ def _is_transient_net_error(exc: BaseException) -> bool:
     )
 
 
-def _with_retry(fn, label, attempts=4, base_delay=1.5):
-    """Call fn() with exponential backoff on transient network errors."""
+def _with_retry(fn, label, attempts=4, base_delay=2.0):
+    """Call fn() with exponential backoff + jitter on transient network errors."""
+    import random
     for attempt in range(1, attempts + 1):
         try:
             return fn()
@@ -542,7 +562,7 @@ def _with_retry(fn, label, attempts=4, base_delay=1.5):
             if attempt == attempts or not _is_transient_net_error(e):
                 print(f"OSMnx error while fetching {label}: {e}")
                 return None
-            delay = base_delay * (2 ** (attempt - 1))
+            delay = base_delay * (2 ** (attempt - 1)) + random.uniform(0, 1.5)
             print(
                 f"  ⚠ {label}: attempt {attempt}/{attempts} failed "
                 f"({e.__class__.__name__}); retrying in {delay:.1f}s..."
@@ -552,21 +572,32 @@ def _with_retry(fn, label, attempts=4, base_delay=1.5):
 
 
 def _fetch_graph_api(point, dist) -> MultiDiGraph | None:
-    """Hit Overpass for the street network. No cache lookups here."""
-    # At very large scales (>100 km) limit to major roads only to keep
-    # data size manageable and the poster readable.
-    if dist > 100_000:
-        custom_filter = (
-            '["highway"~"motorway|motorway_link|trunk|trunk_link'
-            '|primary|primary_link|secondary|secondary_link'
-            '|tertiary|tertiary_link"]'
-        )
+    """Hit Overpass for the street network. No cache lookups here.
+
+    Graduated detail level so we don't ask Overpass for a query it will refuse:
+      - <= 30 km radius: every way (network_type='all', footways/cycleways/service).
+      - 30 km – 150 km: all drivable roads (network_type='drive'); includes
+        residential/unclassified streets but skips footways/service alleys.
+        This is what gives "detailed" 200 km posters their street texture.
+      - > 150 km: trunk/primary/secondary/tertiary only (the bbox is huge at
+        that point and Overpass will refuse anything denser).
+    """
+    if dist <= 30_000:
         return ox.graph_from_point(
             point, dist=dist, dist_type='bbox',
-            custom_filter=custom_filter, truncate_by_edge=True)
+            network_type='all', truncate_by_edge=True)
+    if dist <= 150_000:
+        return ox.graph_from_point(
+            point, dist=dist, dist_type='bbox',
+            network_type='drive', truncate_by_edge=True)
+    custom_filter = (
+        '["highway"~"motorway|motorway_link|trunk|trunk_link'
+        '|primary|primary_link|secondary|secondary_link'
+        '|tertiary|tertiary_link"]'
+    )
     return ox.graph_from_point(
         point, dist=dist, dist_type='bbox',
-        network_type='all', truncate_by_edge=True)
+        custom_filter=custom_filter, truncate_by_edge=True)
 
 
 def _fetch_features_api(point, dist, tags) -> GeoDataFrame | None:
@@ -635,10 +666,12 @@ def prefetch_map_elements(point, dist):
     Cache is checked for every element up-front. Only the elements that
     are missing are fetched from Overpass, and those are fetched in
     parallel (with per-element retries) so a single slow request can't
-    block the others.
+    block the others. If the active Overpass endpoint refuses connections
+    or times out, we rotate to the next mirror and retry only the elements
+    that haven't succeeded yet.
 
     Returns a dict with keys: 'graph', 'water', 'parks', 'coastline'.
-    Any value may be None if its download failed.
+    Any value may be None if its download failed on every endpoint.
     """
     water_tags = {"natural": ["water", "bay", "strait"], "waterway": "riverbank"}
     parks_tags = {"leisure": "park", "landuse": "grass"}
@@ -672,7 +705,7 @@ def prefetch_map_elements(point, dist):
     ]
 
     results: dict = {}
-    to_fetch: list = []
+    remaining: list = []
     for slot, label, key, fn in plan:
         cached = cache_get(key)
         if cached is not None:
@@ -680,37 +713,56 @@ def prefetch_map_elements(point, dist):
             results[slot] = cached
         else:
             results[slot] = None
-            to_fetch.append((slot, label, key, fn))
+            remaining.append((slot, label, key, fn))
 
-    if not to_fetch:
+    if not remaining:
         print("✓ All map elements served from cache")
         return results
 
     print(
-        f"⇣ Downloading {len(to_fetch)} missing element(s) from Overpass in parallel: "
-        + ", ".join(label for _, label, _, _ in to_fetch)
+        f"⇣ Downloading {len(remaining)} missing element(s) from Overpass in parallel: "
+        + ", ".join(label for _, label, _, _ in remaining)
     )
 
-    # Overpass tolerates a few concurrent requests per IP; 4 is the practical max.
-    max_workers = min(4, len(to_fetch))
     t0 = time.time()
-    with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {
-            pool.submit(_with_retry, fn, label): (slot, label, key)
-            for slot, label, key, fn in to_fetch
-        }
-        for fut in as_completed(futures):
-            slot, label, key = futures[fut]
-            data = fut.result()
-            results[slot] = data
-            if data is not None:
-                try:
-                    cache_set(key, data)
-                except CacheError as e:
-                    print(e)
-                print(f"  ✓ {label} downloaded")
-            else:
-                print(f"  ✗ {label} unavailable")
+    for ep_idx, endpoint in enumerate(OVERPASS_ENDPOINTS):
+        if not remaining:
+            break
+        _set_overpass_endpoint(endpoint)
+        if ep_idx > 0:
+            print(
+                f"↻ Switching Overpass endpoint to {endpoint} "
+                f"for {len(remaining)} remaining element(s)"
+            )
+        else:
+            print(f"  using endpoint: {endpoint}")
+
+        still_failing: list = []
+        # Overpass main server documents a 2-slots-per-IP limit; going beyond
+        # that triggers "Connection refused" anti-flood. Keep concurrency at 2.
+        max_workers = min(2, len(remaining))
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            futures = {
+                pool.submit(_with_retry, fn, label, 4, 2.0): (slot, label, key, fn)
+                for slot, label, key, fn in remaining
+            }
+            for fut in as_completed(futures):
+                slot, label, key, fn = futures[fut]
+                data = fut.result()
+                if data is not None:
+                    results[slot] = data
+                    try:
+                        cache_set(key, data)
+                    except CacheError as e:
+                        print(e)
+                    print(f"  ✓ {label} downloaded")
+                else:
+                    still_failing.append((slot, label, key, fn))
+        remaining = still_failing
+
+    for slot, label, key, fn in remaining:
+        print(f"  ✗ {label} unavailable on every Overpass endpoint")
+
     print(f"⇣ Overpass batch finished in {time.time() - t0:.1f}s")
     return results
 

@@ -1688,13 +1688,48 @@ class MapPosterGUI:
             compensated_dist = (
                 dist * (max(height, width) / min(height, width)) / 4)
             self._set_progress(8, "Fetching map elements (cache + Overpass)...")
-            elements = cmp.prefetch_map_elements(coords, compensated_dist)
+
+            # Pipe prefetch stdout into the GUI log so transient Overpass
+            # errors, retries, and timing are visible in the UI (not just
+            # buried in the terminal).
+            import contextlib
+            import io as _io
+
+            class _LogStream(_io.TextIOBase):
+                def __init__(self, log_fn):
+                    self._buf = ""
+                    self._log_fn = log_fn
+
+                def write(self, s):
+                    if not s:
+                        return 0
+                    self._buf += s
+                    while "\n" in self._buf:
+                        line, self._buf = self._buf.split("\n", 1)
+                        if line.strip():
+                            self._log_fn(line)
+                    return len(s)
+
+                def flush(self):
+                    if self._buf.strip():
+                        self._log_fn(self._buf)
+                    self._buf = ""
+
+            log_stream = _LogStream(self._log)
+            with contextlib.redirect_stdout(log_stream):
+                elements = cmp.prefetch_map_elements(
+                    coords, compensated_dist)
+            log_stream.flush()
+
             g = elements["graph"]
             water_data = elements["water"] if show_water else None
             parks_data = elements["parks"] if show_parks else None
             coastline_data = elements["coastline"] if show_coastline else None
             if g is None:
-                self._log("FAIL: Failed to fetch street network")
+                self._log(
+                    "FAIL: Failed to fetch street network "
+                    f"(radius={compensated_dist:.0f}m, point={coords}). "
+                    "See lines above for Overpass error.")
                 return generated_posters
             self._log("OK: Map elements ready (shared across all themes)")
 
