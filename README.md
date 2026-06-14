@@ -14,8 +14,12 @@ dependency, and launches the GUI.
 ### macOS / Linux
 
 ```bash
-python3 -m venv venv && source venv/bin/activate && pip install -r requirements.txt && python gui_mode.py
+python3 -m venv --copies "$HOME/.venvs/maptoposter" && source "$HOME/.venvs/maptoposter/bin/activate" && python -m pip install --upgrade pip && python -m pip install -r requirements.txt && python gui_mode.py
 ```
+
+> macOS note: this uses a virtual environment under `$HOME/.venvs` to avoid
+> "Operation not permitted" errors when project folders are in protected
+> locations like `Downloads`.
 
 ### Windows (PowerShell)
 
@@ -24,7 +28,7 @@ python -m venv venv; .\venv\Scripts\Activate.ps1; pip install -r requirements.tx
 ```
 
 > After the first run, start the GUI again any time with
-> `source venv/bin/activate && python gui_mode.py` (macOS/Linux) or
+> `source "$HOME/.venvs/maptoposter/bin/activate" && python gui_mode.py` (macOS/Linux) or
 > `.\venv\Scripts\Activate.ps1; python gui_mode.py` (Windows).
 
 
