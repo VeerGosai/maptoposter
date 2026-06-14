@@ -35,14 +35,14 @@ htmlcov/
 .coverage
 .pytest_cache/
 
-posters/
-posters
-posters.zip
+# Generated output (all posters/exports live here)
 exports/
 exports
 exports.zip
+posters/
+posters
+posters.zip
 TEMP/
 TEMP
-n22222222/
 fonts/
 cache/
