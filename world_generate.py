@@ -67,7 +67,11 @@ DETAIL_DIST = 200_000
 
 THEME_PATH = SCRIPT_DIR / "themes" / "dark" / "dark_white.json"
 OUT_ROOT = SCRIPT_DIR / "exports" / "world_project"
+# Two resolutions per cell so the viewer can "load more detail" on zoom:
+#   tiles/         - downscaled overview, shown when zoomed out (fast, small).
+#   tiles_detail/  - full-resolution render, swapped in when zoomed in.
 TILES_DIR = OUT_ROOT / "tiles"
+DETAIL_DIR = OUT_ROOT / "tiles_detail"
 PROGRESS_LOG = OUT_ROOT / "progress.log"
 MANIFEST_PATH = OUT_ROOT / "manifest.json"
 VIEWER_PATH = OUT_ROOT / "viewer.html"
@@ -88,7 +92,8 @@ _ALL_TIER_TYPES = set().union(*[t[0] for t in _ROAD_TIERS])
 
 @dataclass
 class Config:
-    size: int
+    detail_size: int
+    overview_size: int
     dpi: int
     road_width: float
     theme: dict
@@ -117,20 +122,29 @@ def _hw_value(val):
     return val or "unclassified"
 
 
-def _draw(lon, lat, roads, coast, water, parks, out_path: Path):
+def _draw(lon, lat, roads, coast, water, parks,
+          detail_path: Path, overview_path: Path):
     cfg = _CFG
     theme = cfg.theme
-    size_in = cfg.size / cfg.dpi
+    size_in = cfg.detail_size / cfg.dpi
+
+    # The output is a fixed pixel size (detail_size), so DPI alone would only
+    # change how thick a 1-pt line renders (px = pts * dpi/72). Calibrate line
+    # widths to a 100-DPI reference so the tile looks identical at any DPI.
+    rw = cfg.road_width * (100.0 / cfg.dpi)
 
     fig = plt.figure(figsize=(size_in, size_in), dpi=cfg.dpi,
                      facecolor=theme["bg"])
     try:
         ax = fig.add_axes([0, 0, 1, 1])
         ax.set_facecolor(theme["bg"])
-        # Exact 1 deg cell extent in raw lon/lat (plate-carree) so adjacent
-        # tiles line up perfectly.
-        ax.set_xlim(lon, lon + 1)
-        ax.set_ylim(lat, lat + 1)
+        # Each tile must fill its square image exactly with the 1 deg cell so
+        # neighbouring tiles butt together with no gaps. geopandas .plot()
+        # defaults to aspect='equal' and re-autoscales to the data bounds,
+        # which would shrink the content (leaving black bars where the data
+        # doesn't reach the cell edge). We force aspect='auto' and pin the
+        # limits AFTER all plotting so the whole 1x1 deg cell maps to the
+        # whole square image.
         ax.set_axis_off()
 
         # Water (lowest), then parks, then coastline outline.
@@ -149,7 +163,7 @@ def _draw(lon, lat, roads, coast, water, parks, out_path: Path):
                 ["LineString", "MultiLineString", "Polygon", "MultiPolygon"])]
             if len(cg) > 0:
                 cg.plot(ax=ax, edgecolor=theme.get("coastline", "#FFFFFF"),
-                        facecolor="none", linewidth=0.5 * cfg.road_width,
+                        facecolor="none", linewidth=0.5 * rw,
                         zorder=1.5)
 
         # Roads in hierarchical passes (major on top).
@@ -162,7 +176,7 @@ def _draw(lon, lat, roads, coast, water, parks, out_path: Path):
                 typed |= hw_set
                 if subset.empty:
                     continue
-                width = base_w * cfg.road_width
+                width = base_w * rw
                 if width < 0.05:
                     continue
                 color = theme.get(color_key, theme.get("road_default",
@@ -174,28 +188,52 @@ def _draw(lon, lat, roads, coast, water, parks, out_path: Path):
                 lambda v: _hw_value(v) not in typed)
             other = roads[mask_other]
             if not other.empty:
-                width = 0.25 * cfg.road_width
+                width = 0.25 * rw
                 if width >= 0.05:
                     other.plot(ax=ax,
                                color=theme.get("road_default", "#A0A0A0"),
                                linewidth=width, zorder=2,
                                capstyle="round", joinstyle="round")
 
-        tmp = out_path.with_name(out_path.name + ".tmp")
+        # Pin the exact 1 deg cell extent LAST and disable equal-aspect so the
+        # cell fills the square image edge-to-edge (no black bars / gaps).
+        ax.set_aspect("auto")
+        ax.set_xlim(lon, lon + 1)
+        ax.set_ylim(lat, lat + 1)
+        ax.set_axis_off()
+
+        # Save the full-resolution detail tile.
+        tmp = detail_path.with_name(detail_path.name + ".tmp")
         fig.savefig(tmp, format="png", dpi=cfg.dpi, facecolor=theme["bg"],
                     pad_inches=0)
-        os.replace(tmp, out_path)
+        os.replace(tmp, detail_path)
     finally:
         plt.close(fig)
+
+    # Downscale the detail tile into the lightweight overview tile (shown when
+    # zoomed out). Re-using the rendered pixels avoids a second plot pass.
+    if cfg.overview_size and cfg.overview_size < cfg.detail_size:
+        from PIL import Image
+        with Image.open(detail_path) as im:
+            ov = im.resize((cfg.overview_size, cfg.overview_size),
+                           Image.LANCZOS)
+            otmp = overview_path.with_name(overview_path.name + ".tmp")
+            ov.save(otmp, format="PNG")
+            os.replace(otmp, overview_path)
+    else:
+        # Overview == detail size: just copy/hardlink the same image.
+        import shutil
+        shutil.copyfile(detail_path, overview_path)
 
 
 def render_cell(cell):
     """Worker entry point. Returns (lon, lat, status)."""
     lon, lat = cell
     cfg = _CFG
-    out_path = TILES_DIR / f"tile_{lon}_{lat}.png"
+    detail_path = DETAIL_DIR / f"tile_{lon}_{lat}.png"
+    overview_path = TILES_DIR / f"tile_{lon}_{lat}.png"
 
-    if cfg.resume and out_path.exists():
+    if cfg.resume and detail_path.exists() and overview_path.exists():
         return (lon, lat, "ok")
 
     try:
@@ -220,7 +258,8 @@ def render_cell(cell):
         return (lon, lat, "empty")
 
     try:
-        _draw(lon, lat, roads, coast, water, parks, out_path)
+        _draw(lon, lat, roads, coast, water, parks,
+              detail_path, overview_path)
     except Exception:  # noqa: BLE001
         return (lon, lat, "error")
 
@@ -292,8 +331,15 @@ class _PlainBar:
         sys.stdout.flush()
 
 
-def _write_manifest(size):
-    """Scan rendered tiles and write manifest.json for the browser viewer."""
+def _write_manifest(overview_size, detail_size):
+    """Scan rendered tiles and write the manifest for the browser viewer.
+
+    Writes both ``manifest.json`` (handy for other tools) and ``manifest.js``
+    (``window.WORLD_MANIFEST = {...}``). The viewer loads the ``.js`` version
+    via a <script> tag, which works even when ``viewer.html`` is opened
+    directly from disk (``file://``), where ``fetch()`` is blocked by the
+    browser's CORS policy.
+    """
     tiles = []
     for p in TILES_DIR.glob("tile_*_*.png"):
         stem = p.stem  # tile_{lon}_{lat}
@@ -303,13 +349,20 @@ def _write_manifest(size):
         except ValueError:
             continue
     tiles.sort()
-    MANIFEST_PATH.write_text(json.dumps({
-        "tile_size": size,
+    payload = {
+        "tile_size": overview_size,
+        "overview_size": overview_size,
+        "detail_size": detail_size,
         "count": len(tiles),
         "generated": time.strftime("%Y-%m-%d %H:%M:%S"),
         "tiles": tiles,
-    }), encoding="utf-8")
+    }
+    data = json.dumps(payload)
+    MANIFEST_PATH.write_text(data, encoding="utf-8")
+    (OUT_ROOT / "manifest.js").write_text(
+        "window.WORLD_MANIFEST = " + data + ";\n", encoding="utf-8")
     return len(tiles)
+
 
 
 _VIEWER_HTML = """<!DOCTYPE html>
@@ -325,38 +378,74 @@ _VIEWER_HTML = """<!DOCTYPE html>
   .info { position: absolute; z-index: 1000; top: 10px; left: 10px;
           color: #fff; font: 12px monospace; background: rgba(0,0,0,.6);
           padding: 6px 8px; border-radius: 4px; }
+  .leaflet-container { background: #000; }
 </style>
 </head>
 <body>
 <div id="map"></div>
 <div class="info" id="info">loading…</div>
+<!-- manifest.js sets window.WORLD_MANIFEST; loading it via a <script> tag
+     works from file:// (unlike fetch, which the browser blocks). -->
+<script src="manifest.js" onerror="window.__manifestErr=true"></script>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script>
 const map = L.map('map', {
   crs: L.CRS.EPSG4326,
-  center: [20, 0],
+  center: [0, 0],
   zoom: 3,
   minZoom: 1,
-  maxZoom: 9,
+  maxZoom: 12,
   worldCopyJump: false,
 });
 
-const layerByKey = new Map();
+const info = document.getElementById('info');
+const layerByKey = new Map();   // key -> { ov, hi }  (hi = currently hi-res?)
 let tileSet = new Set();
-let tileSize = 1024;
+let didFit = false;
+// Above this zoom the viewer swaps each visible tile to its full-resolution
+// version from tiles_detail/, so zooming in reveals more detail.
+const DETAIL_ZOOM = 6;
 
-fetch('manifest.json').then(r => r.json()).then(m => {
-  tileSize = m.tile_size || 1024;
+function applyManifest(m) {
+  tileSet = new Set();
   m.tiles.forEach(([lon, lat]) => tileSet.add(lon + ',' + lat));
-  document.getElementById('info').textContent =
-    m.count + ' tiles · generated ' + m.generated;
+  info.textContent = m.count + ' tiles · generated ' + m.generated;
+
+  // First time we have tiles, fly the map to wherever they actually are so
+  // you never stare at an empty black ocean.
+  if (!didFit && m.tiles.length) {
+    let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90;
+    for (const [lon, lat] of m.tiles) {
+      minLon = Math.min(minLon, lon); maxLon = Math.max(maxLon, lon + 1);
+      minLat = Math.min(minLat, lat); maxLat = Math.max(maxLat, lat + 1);
+    }
+    map.fitBounds([[minLat, minLon], [maxLat, maxLon]]);
+    didFit = true;
+  }
   refresh();
-}).catch(e => {
-  document.getElementById('info').textContent = 'manifest.json not found';
-});
+}
+
+function loadManifest() {
+  if (window.WORLD_MANIFEST) {
+    applyManifest(window.WORLD_MANIFEST);
+    return;
+  }
+  // Fallback: try fetch (works when served over http://).
+  fetch('manifest.json').then(r => r.json()).then(applyManifest).catch(() => {
+    info.textContent =
+      'manifest not found — run world_generate.py first, ' +
+      'or serve this folder (python -m http.server).';
+  });
+}
+
+function tileUrl(lon, lat, hi) {
+  const dir = hi ? 'tiles_detail/' : 'tiles/';
+  return dir + 'tile_' + lon + '_' + lat + '.png';
+}
 
 function refresh() {
   const b = map.getBounds();
+  const wantHi = map.getZoom() >= DETAIL_ZOOM;
   const lonMin = Math.floor(b.getWest()), lonMax = Math.ceil(b.getEast());
   const latMin = Math.floor(b.getSouth()), latMax = Math.ceil(b.getNorth());
   const wanted = new Set();
@@ -365,27 +454,44 @@ function refresh() {
       const key = lon + ',' + lat;
       if (!tileSet.has(key)) continue;
       wanted.add(key);
-      if (!layerByKey.has(key)) {
-        const url = 'tiles/tile_' + lon + '_' + lat + '.png';
-        const bounds = [[lat, lon], [lat + 1, lon + 1]];
-        const ov = L.imageOverlay(url, bounds, { opacity: 1 });
+      const entry = layerByKey.get(key);
+      const bounds = [[lat, lon], [lat + 1, lon + 1]];
+      if (!entry) {
+        const ov = L.imageOverlay(tileUrl(lon, lat, wantHi), bounds,
+                                  { opacity: 1 });
         ov.addTo(map);
-        layerByKey.set(key, ov);
+        layerByKey.set(key, { ov, hi: wantHi });
+      } else if (entry.hi !== wantHi) {
+        // Zoom crossed the detail threshold - upgrade/downgrade this tile.
+        entry.ov.setUrl(tileUrl(lon, lat, wantHi));
+        entry.hi = wantHi;
       }
     }
   }
   // Drop overlays that scrolled far out of view to keep the DOM light.
-  for (const [key, ov] of layerByKey) {
-    if (!wanted.has(key)) { map.removeLayer(ov); layerByKey.delete(key); }
+  for (const [key, entry] of layerByKey) {
+    if (!wanted.has(key)) { map.removeLayer(entry.ov); layerByKey.delete(key); }
   }
 }
 
 map.on('moveend', refresh);
 map.on('zoomend', refresh);
+loadManifest();
+
+// While an overnight run is still going, re-pull the manifest periodically so
+// new tiles appear without a manual reload. Only works when served over http://
+// (file:// can't re-fetch); harmless otherwise.
+setInterval(() => {
+  fetch('manifest.json', { cache: 'no-store' })
+    .then(r => r.json())
+    .then(m => { if (m.count !== tileSet.size) applyManifest(m); })
+    .catch(() => {});
+}, 30000);
 </script>
 </body>
 </html>
 """
+
 
 
 def _write_viewer():
@@ -399,9 +505,14 @@ def main():
         description="Render every 1 deg world block as a square tile image.")
     parser.add_argument("--workers", type=int, default=0,
                         help="Parallel worker processes (default: CPU count).")
-    parser.add_argument("--size", type=int, default=1024,
-                        help="Tile image size in pixels (square). Default 1024.")
-    parser.add_argument("--dpi", type=int, default=100, help="Render DPI.")
+    parser.add_argument("--detail-size", type=int, default=3072,
+                        help="Full-resolution tile size in px (square), shown "
+                             "when zoomed in. Default 3072.")
+    parser.add_argument("--size", "--overview-size", type=int, default=1024,
+                        dest="size",
+                        help="Overview tile size in px, shown when zoomed out. "
+                             "Default 1024.")
+    parser.add_argument("--dpi", type=int, default=300, help="Render DPI.")
     parser.add_argument("--road-width", type=float, default=1.5,
                         help="Road line-width multiplier. Default 1.5.")
     parser.add_argument("--lon-min", type=int, default=-180)
@@ -416,12 +527,16 @@ def main():
 
     workers = args.workers or (os.cpu_count() or 8)
 
+    detail_size = max(args.size, args.detail_size)
+
     TILES_DIR.mkdir(parents=True, exist_ok=True)
+    DETAIL_DIR.mkdir(parents=True, exist_ok=True)
 
     theme = json.loads(THEME_PATH.read_text(encoding="utf-8"))
 
     cfg = Config(
-        size=args.size,
+        detail_size=detail_size,
+        overview_size=args.size,
         dpi=args.dpi,
         road_width=args.road_width,
         theme=theme,
@@ -441,7 +556,8 @@ def main():
     print("=" * 60)
     print(f"  Output      : {OUT_ROOT}")
     print(f"  Source      : CDN ({pbf_data.CDN_BASE}) + cache")
-    print(f"  Tile size   : {args.size}x{args.size} px, 1 deg square")
+    print(f"  Tile size   : {args.size}px overview / {detail_size}px detail, "
+          f"1 deg square")
     print(f"  Workers     : {workers}")
     print(f"  World cells : {total_world}")
     print(f"  Already done: {total_world - len(pending)}")
@@ -450,7 +566,7 @@ def main():
 
     if not pending:
         print("Nothing to do - everything is already rendered.")
-        n = _write_manifest(args.size)
+        n = _write_manifest(args.size, detail_size)
         _write_viewer()
         print(f"Manifest: {n} tiles. Open {VIEWER_PATH} in a browser.")
         return
@@ -490,7 +606,7 @@ def main():
                             f"err={counts['error']}")
                     now = time.time()
                     if now - last_manifest > 120:
-                        _write_manifest(args.size)
+                        _write_manifest(args.size, detail_size)
                         _write_viewer()
                         last_manifest = now
             except KeyboardInterrupt:
@@ -502,7 +618,7 @@ def main():
         bar.close()
         log.flush()
         log.close()
-        n = _write_manifest(args.size)
+        n = _write_manifest(args.size, detail_size)
         _write_viewer()
 
     print("-" * 60)
